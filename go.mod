@@ -7,4 +7,7 @@ require (
 	golang.org/x/time v0.15.0
 )
 
-require golang.org/x/sys v0.10.0 // indirect
+require (
+	go.yaml.in/yaml/v4 v4.0.0-rc.5 // indirect
+	golang.org/x/sys v0.10.0 // indirect
+)

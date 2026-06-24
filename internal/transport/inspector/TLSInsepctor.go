@@ -24,6 +24,7 @@ func (t *TLS) Read(fd int) (bool, error) {
 		n, err := unix.Read(fd, tmp)
 
 		if err != nil {
+
 			if err == unix.EINTR {
 				continue
 			}
@@ -50,6 +51,7 @@ func (t *TLS) Read(fd int) (bool, error) {
 				if err == nil {
 					t.sni = hello.SNI
 					t.alpn = hello.ALPN
+					
 				}
 			
 				return true, nil

@@ -3,6 +3,7 @@ package inspector
 import (
 	"golang.org/x/sys/unix"
 
+	"log"
 	"bytes"
 	"io"
 	"errors"
@@ -30,7 +31,7 @@ func (h *HTTP) Read(fd int) (bool, error) {
 				continue
 
 			case unix.EAGAIN:
-				return true, nil
+				return false, nil
 
 			default:
 				return false, err

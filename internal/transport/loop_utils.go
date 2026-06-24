@@ -10,27 +10,6 @@ import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport/inspector"
 )
 
-type EventLoop struct {
-	epfd   int
-	conns  map[int]*Conn
-	picker BackendPicker
-	inspector inspector.Inspector
-}
-
-func NewEventLoop(w *Wrapper) (*EventLoop, error) {
-	epfd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
-	if err != nil {
-		return nil, err
-	}
-
-	return &EventLoop{
-		epfd:   epfd,
-		conns:  make(map[int]*Conn),
-		picker: w.picker,
-		inspector: w.inspector,
-	}, nil
-}
-
 const baseEvents = uint32(
 	unix.EPOLLIN |
 		unix.EPOLLET |
@@ -38,6 +17,14 @@ const baseEvents = uint32(
 		unix.EPOLLHUP |
 		unix.EPOLLERR,
 )
+
+func (l *EventLoop) Inspector() inspector.Inspector {
+    return l.inspector.Load().(inspector.Inspector)
+}
+
+func (l *EventLoop) Picker() BackendPicker {
+    return l.picker.Load().(BackendPicker)
+}
 
 func (l *EventLoop) updateInterest(c *Conn) {
 	clientEvents := baseEvents
@@ -215,7 +202,7 @@ func isConnected(fd int) bool {
 	return errno == 0
 }
 
-func iPString(sa unix.Sockaddr) string {
+func ipString(sa unix.Sockaddr) string {
 	switch addr := sa.(type) {
 
 	case *unix.SockaddrInet4:

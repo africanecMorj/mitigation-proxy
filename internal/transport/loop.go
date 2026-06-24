@@ -5,10 +5,38 @@ import (
 	"io"
 	"log"
 	"errors"
+	"sync/atomic"
 
 	"golang.org/x/sys/unix"
 
 )
+
+type EventLoop struct {
+	epfd   int
+	conns  map[int]*Conn
+	picker atomic.Value
+    inspector atomic.Value
+
+}
+
+func NewEventLoop(w *Wrapper) (*EventLoop, error) {
+	epfd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
+	if err != nil {
+		return nil, err
+	}
+
+	e := EventLoop{
+		epfd:   epfd,
+		conns:  make(map[int]*Conn),
+	}
+
+	e.picker.Store(w.Picker)
+	e.inspector.Store(w.Inspector)
+
+	return &e, nil
+}
+
+
 
 func (l *EventLoop) Run(listenerFD int) error {
 	if err := setNonblock(listenerFD); err != nil {
@@ -70,7 +98,7 @@ func (l *EventLoop) acceptLoop(listenerFD int) {
 			unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC,
 		)
 		if err != nil {
-			if err == unix.EAGAIN {
+			if err == unix.EAGAIN || err == unix.EBADF {
 				return
 			}
 			return
@@ -123,9 +151,11 @@ func (l *EventLoop) handleIO(c *Conn, fd int) {
 
 
 func (l* EventLoop) handleInspecting(c *Conn) {
-	done, err := l.inspector.Read(
+	done, err := l.Inspector().Read(
 		c.clientFD,
 	)
+
+	log.Printf("sniff result: done=%v, err=%v", done, err)
 
 	if err != nil {
 	
@@ -146,9 +176,12 @@ func (l* EventLoop) handleInspecting(c *Conn) {
 }
 
 func (l *EventLoop) handleRouting(c *Conn) {
-	info := l.inspector.RouteKey()
+	ip := ipString(c.clientAddr)
 
-	backend, bfd, err := l.picker.Pick(info.SNI, info.ALPN, info.Host)
+	info := l.Inspector().RouteKey()
+	log.Printf("Routeinfo:%+v", info)
+
+	backend, bfd, err := l.Picker().Pick(info.SNI, info.Host, info.ALPN, ip)
 	if err != nil {
 		l.failAndClose(c)
 		return
@@ -280,7 +313,8 @@ func (l *EventLoop) handleProxy(c *Conn, fd int) {
 
 func (l *EventLoop) handleSending(c *Conn) error {
 
-	data := l.inspector.Data()
+	data := l.Inspector().Data()
+
 
 	for c.initialSent < len(data) {
 
@@ -309,7 +343,7 @@ func (l *EventLoop) handleSending(c *Conn) error {
 		c.initialSent += n
 	}
 
-	l.inspector.Close()
+	l.Inspector().Close()
 
 	c.backendWantsWrite = false
 

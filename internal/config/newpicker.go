@@ -3,13 +3,14 @@ package config
 import (
 	"fmt"
     "strings"
+    "log"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/balancers"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport"
 )
 
 func NewPicker(
-    routing Listener,
+    listener Listener,
     clusters map[string]balancers.Balancer,
 ) (*transport.Picker, error) {
 
@@ -18,7 +19,7 @@ func NewPicker(
         ExactHosts: make(map[string]balancers.Balancer),
     }
 
-    for _, rule := range routing.Routing.Rules {
+    for _, rule := range listener.Routing.Rules {
         b, ok := clusters[rule.Cluster]
         if !ok {
             return nil, fmt.Errorf(
@@ -50,19 +51,27 @@ func NewPicker(
         if rule.Default {
             p.DefaultBalancer = b
         }
+
     }
 
-    if p.DefaultBalancer == nil && routing.Routing.DefaultCluster != "" {
-        b, ok := clusters[routing.Routing.DefaultCluster]
+    if p.DefaultBalancer == nil && listener.Routing.DefaultCluster != "" {
+        b, ok := clusters[listener.Routing.DefaultCluster]
         if !ok {
             return nil, fmt.Errorf(
                 "unknown default cluster %q",
-                routing.Routing.DefaultCluster,
+                listener.Routing.DefaultCluster,
             )
         }
 
         p.DefaultBalancer = b
     }
 
+    log.Printf(
+        "picker created default=%T cluster=%q",
+        p.DefaultBalancer,
+        listener.Routing.DefaultCluster,
+    )
+
     return p, nil
 }
+

@@ -3,17 +3,19 @@ package transport
 import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport/inspector"
+
+	"golang.org/x/sys/unix"
 )
 
 type BackendDialer func() (int, error)
 
 type BackendPicker interface {
-	Pick(host string, alpn []string, clientIP string) (*health.Backend, int, error)
+	Pick(sni, host string, alpn []string, clientIP string) (*health.Backend, int, error)
 }
 
 type Wrapper struct {
-	picker    BackendPicker
-	inspector inspector.Inspector
+	Picker    BackendPicker
+	Inspector inspector.Inspector
 }
 
 func NewWrapper(
@@ -24,25 +26,32 @@ func NewWrapper(
     switch proto {
     case "tls":
         return Wrapper{
-            inspector: inspector.NewTLS(),
-            picker:    p,
+            Inspector: inspector.NewTLS(),
+            Picker:    p,
         }
 
     case "http":
         return Wrapper{
-            inspector: inspector.NewHTTP(),
-            picker:    p,
+            Inspector: inspector.NewHTTP(),
+            Picker:    p,
+        }
+
+    case "quic":
+        return Wrapper{
+            Inspector: inspector.NewQUIC(),
+            Picker:    p,
         }
 
     default:
         return Wrapper{
-            inspector: inspector.NewTCP(),
-            picker:    p,
+            Inspector: inspector.NewTCP(),
+            Picker:    p,
         }
     }
 }
 
 type Transport struct {
+    listenerFD int
 	loop *EventLoop
 }
 
@@ -56,5 +65,17 @@ func New(w *Wrapper) (*Transport, error) {
 }
 
 func (t *Transport) Run(listenerFD int) error {
-	return t.loop.Run(listenerFD)
+	t.listenerFD = listenerFD
+    return t.loop.Run(listenerFD)
+}
+
+func (t *Transport) Reload(
+	w *Wrapper,
+) {
+	t.loop.picker.Store(w.Picker)
+	t.loop.inspector.Store(w.Inspector)
+}
+
+func (t *Transport) Close() {
+	unix.Close(t.listenerFD)
 }

@@ -4,7 +4,9 @@ import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/balancers"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/balancers/strategies"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
-	"github.com/africanecMorj/mitigation-proxy.git/pkg"
+
+	"context"
+	"time"
 )
 
 func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
@@ -14,34 +16,30 @@ func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
 		var backends []*health.Backend
 
 		for _, b := range c.Backends {
-			family, sa, err := pkg.ResolveSockaddr(b.Address)
-			
+			ctx, cancel := context.WithCancel(context.Background())
+
+			be, err := health.NewBackend(b.Address, b.Tau, b.Weight, ctx, cancel)
 			if err != nil {
 				return nil, err
 			}
-			
-			be := health.Backend{
-				Address: b.Address,
-				Tau: b.Tau,
-				Family:family,
-				SockAddr:sa,
-			}
-			be.SetWeight(b.Weight)
 
-			go be.StartHealthChecks()
-
-			backends = append(backends, &be)
+			backends = append(backends, be)
 		}
 
 		var bl balancers.Balancer
+		timeout, _ := time.ParseDuration("10s")
 
 		switch c.LB {
 		case "ewma":
 			bl = strategies.NewLeastConnections(backends)
-		// case "p2c":
-		// 	bl = NewP2C(backends)
+			bl.StartHealthChecks(timeout)
+		case "p2c":
+			bl = strategies.NewP2C(backends)
+			bl.StartHealthChecks(timeout)
 		default:
 			bl = strategies.NewRoundRobin(backends)
+			bl.StartHealthChecks(timeout)
+
 		}
 
 		result[c.Name] = bl
@@ -49,7 +47,3 @@ func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
 
 	return result, nil
 }
-
-
-
-

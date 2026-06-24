@@ -64,7 +64,6 @@ func (b *BaseBalancer) Backends() []*health.Backend {
 }
 
 func (b *BaseBalancer) StartHealthChecks(
-    ctx context.Context,
     interval time.Duration,
 ) {
     for _, backend := range b.Backends() {
@@ -76,7 +75,7 @@ func (b *BaseBalancer) StartHealthChecks(
                 )
 
                 select {
-                case <-ctx.Done():
+                case <-backend.Ctx.Done():
                     return
                 case <-time.After(jitter):
                 }
@@ -89,7 +88,7 @@ func (b *BaseBalancer) StartHealthChecks(
 
             for {
                 select {
-                case <-ctx.Done():
+                case <-backend.Ctx.Done():
                     return
 
                 case <-ticker.C:
@@ -100,3 +99,4 @@ func (b *BaseBalancer) StartHealthChecks(
         }(backend)
     }
 }
+

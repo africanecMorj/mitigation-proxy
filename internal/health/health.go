@@ -1,10 +1,10 @@
 package health
 
 import (
-	"log"
-	"time"
-	"math"
 	"errors"
+	"log"
+	"math"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -30,6 +30,10 @@ func (b *Backend) ObserveLatency(sample time.Duration) {
 			float64(sample)*(1-alpha)
 
 	b.lastEWMAUpdate = now
+
+	b.TotalLatency.Add(
+		uint64(sample),
+	)
 }
 
 func (b *Backend) EWMA() float64 {
@@ -39,87 +43,12 @@ func (b *Backend) EWMA() float64 {
 	return b.ewma
 }
 
-
-func (b *Backend) SetState(state BackendState) {
-	b.State.Store(int32(state))
-	b.LastStateChange.Store(time.Now().UnixNano())
-}
-
-func (b *Backend) TTFBValue() int64 {
-    return int64(b.ttfb.Load())
-}
-
-func (b *Backend) SetTTFB(t int64) {
-    b.ttfb.Store(t)
-}
-
-func (b *Backend) WeightValue() int64 {
-    return int64(b.Weight.Load())
-}
-
-func (b *Backend) SetWeight(weight int64) {
-    b.Weight.Store(weight)
-}
-
-func (b *Backend) CurrentWeightValue() int64 {
-    return b.currentWeight.Load()
-}
-
-func (b *Backend) AddCurrentWeight(delta int64) int64 {
-    return b.currentWeight.Add(delta)
-}
-
-func (b *Backend) StartDrain(timeout time.Duration) {
-	if !b.draining.CompareAndSwap(false, true) {
+func (b *Backend) HealthCheck() {
+	state := b.State.Load()
+	if BackendState(state) == Draining || BackendState(state) == Removed {
 		return
 	}
 
-	b.SetState(Draining)
-
-	b.DrainStartedAt.Store(
-		time.Now().UnixNano(),
-	)
-
-	go b.monitorDrain(timeout)
-}
-
-func (b *Backend) monitorDrain(timeout time.Duration) {
-	defer b.draining.Store(false)
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-
-		if b.ActiveConnections.Load() == 0 {
-			log.Printf(
-				"backend %s drain complete",
-				b.Address,
-			)
-
-			b.SetState(Unhealthy)
-			return
-		}
-
-		started := time.Unix(
-			0,
-			b.DrainStartedAt.Load(),
-		)
-
-		if time.Since(started) >= timeout {
-
-			log.Printf(
-				"backend %s drain timeout exceeded",
-				b.Address,
-			)
-
-			b.SetState(Unhealthy)
-			return
-		}
-	}
-}
-
-func (b *Backend) HealthCheck() {
 	fd, err := unix.Socket(
 		b.Family,
 		unix.SOCK_STREAM,
@@ -183,6 +112,9 @@ func (b *Backend) HealthCheck() {
 
 func (b *Backend) MarkFailure() {
 	failures := b.ConsecutiveFailures.Add(1)
+	b.TotalFailures.Add(1)
+
+	b.Requests.Add(1)
 
 	b.ConsecutiveSuccesses.Store(0)
 
@@ -206,14 +138,13 @@ func (b *Backend) MarkSuccess(
 	latency time.Duration,
 ) {
 	b.ConsecutiveFailures.Store(0)
+	b.TotalSuccesses.Add(1)
+
+	b.Requests.Add(1)
 
 	successes := b.ConsecutiveSuccesses.Add(1)
 
 	b.ObserveLatency(latency)
-
-	b.AvgLatency.Store(
-		latency.Milliseconds(),
-	)
 
 	state := BackendState(
 		b.State.Load(),

@@ -27,7 +27,8 @@ type Rule struct {
 	Host    string   `yaml:"host"`
 	ALPN    []string `yaml:"alpn"`
 	Cluster string   `yaml:"cluster"`
-	Default bool `yaml:"default"`
+	
+	Metadata map[string]string
 }
 
 type Cluster struct {

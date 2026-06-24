@@ -41,6 +41,8 @@ func (rr *RoundRobin) Next() *health.Backend {
 
 		case health.Draining:
 			continue
+		case health.Removed:
+			continue
 
 		case health.Recovering:
 			effectiveWeight = max(

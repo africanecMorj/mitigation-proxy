@@ -41,7 +41,6 @@ func Splice(src, dst *os.File) error {
 	}
 	defer unix.Close(epfd)
 
-	// 🔥 тільки EPOLLIN для src
 	if err := unix.EpollCtl(epfd, unix.EPOLL_CTL_ADD, srcFD, &unix.EpollEvent{
 		Events: unix.EPOLLIN | unix.EPOLLHUP | unix.EPOLLERR,
 		Fd:     int32(srcFD),
@@ -49,7 +48,6 @@ func Splice(src, dst *os.File) error {
 		return err
 	}
 
-	// dst додаємо, але без постійного EPOLLOUT
 	if err := unix.EpollCtl(epfd, unix.EPOLL_CTL_ADD, dstFD, &unix.EpollEvent{
 		Events: unix.EPOLLHUP | unix.EPOLLERR,
 		Fd:     int32(dstFD),
@@ -73,7 +71,6 @@ func Splice(src, dst *os.File) error {
 		for i := 0; i < nEvents; i++ {
 			ev := events[i]
 
-			// 🔥 обробка помилок
 			if ev.Events&(unix.EPOLLERR|unix.EPOLLHUP) != 0 {
 				return nil
 			}
@@ -115,7 +112,6 @@ func Splice(src, dst *os.File) error {
 					pipeBuffered += int(n)
 				}
 
-				// 🔥 включаємо EPOLLOUT тільки коли є що писати
 				if pipeBuffered > 0 {
 					_ = unix.EpollCtl(epfd, unix.EPOLL_CTL_MOD, dstFD, &unix.EpollEvent{
 						Events: unix.EPOLLOUT | unix.EPOLLHUP | unix.EPOLLERR,
@@ -149,7 +145,6 @@ func Splice(src, dst *os.File) error {
 					pipeBuffered -= int(n)
 				}
 
-				// 🔥 якщо все записали — прибираємо EPOLLOUT
 				if pipeBuffered == 0 {
 					_ = unix.EpollCtl(epfd, unix.EPOLL_CTL_MOD, dstFD, &unix.EpollEvent{
 						Events: unix.EPOLLHUP | unix.EPOLLERR,

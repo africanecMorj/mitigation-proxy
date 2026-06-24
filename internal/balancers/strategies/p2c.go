@@ -2,33 +2,43 @@ package strategies
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/balancers"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
 )
 
-type LeastConnections struct {
+type P2C struct {
 	balancers.BaseBalancer
 }
 
-func NewLeastConnections(
+func NewP2C(
 	backends []*health.Backend,
-) *LeastConnections {
+) *P2C {
 
-	return &LeastConnections{
+	return &P2C{
 		BaseBalancer: balancers.NewBaseBalancer(
 			backends,
 		),
 	}
 }
 
-func (lb *LeastConnections) Next() *health.Backend {
-
+func (lb *P2C) Next() *health.Backend {
 	backends := lb.Backends()
 
 	if len(backends) == 0 {
 		return nil
+	}
+
+	if len(backends) == 1 {
+		return backends[0]
+	}
+
+	b1 := rand.IntN(len(backends))
+
+	b2 := rand.IntN(len(backends))
+	for b2 == b1 {
+		b2 = rand.IntN(len(backends))
 	}
 
 	var (
@@ -36,15 +46,20 @@ func (lb *LeastConnections) Next() *health.Backend {
 		bestScore = math.MaxFloat64
 	)
 
-	for _, backend := range backends {
-		state := health.BackendState(backend.State.Load())
+	for _, backend := range []*health.Backend{
+		backends[b1],
+		backends[b2],
+	} {
+		switch backend.StateValue() {
+		case health.Unhealthy,
+			health.Draining,
+			health.Removed:
+			continue
+		}
 
 		penalty := 1.0
 
-		switch state {
-		case health.Unhealthy, health.Draining, health.Removed:
-			continue
-
+		switch backend.StateValue() {
 		case health.Recovering:
 			penalty = 1.5
 
@@ -66,9 +81,8 @@ func (lb *LeastConnections) Next() *health.Backend {
 		active := backend.ActiveConnections.Load()
 
 		weight := backend.WeightValue()
-		score := (float64(latency) + 0.2*float64(ttfb)) * float64(ttfb) * math.Sqrt(float64(active+1)) * penalty
-		score += rand.Float64() * 0.01
-		score = score / float64(weight)
+
+		score := (float64(latency) + 0.2*float64(ttfb)) * math.Sqrt(float64(active+1)) * penalty / float64(weight)
 
 		if score < bestScore {
 			bestScore = score

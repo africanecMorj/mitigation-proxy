@@ -10,52 +10,55 @@ import (
 
 func (rt *Runtime) Reload(cfg *config.Config) error {
 
-    newClusters, err := config.BuildClusters(cfg)
-    if err != nil {
-        return err
-    }
+	if err := rt.applyGlobals(cfg); err != nil {
+		return err
+	}
 
-    // drain old
-    for _, bl := range rt.clusters {
-        for _, backend := range bl.Backends() {
-            backend.StartDrain(5 * time.Minute, health.Removed)
-        }
-    }
+	old := rt.clusters.Load()
 
-    // start watchers for new
-    for _, bl := range newClusters {
-        for _, backend := range bl.Backends() {
-            rt.wg.Add(1)
-            go rt.WatchBackend(bl, backend)
-        }
-    }
+	newClusters, err := config.BuildClusters(cfg)
+	if err != nil {
+		return err
+	}
 
+	for _, listener := range cfg.Listeners {
+
+		p, err := config.NewPicker(
+			listener,
+			newClusters,
+		)
+		if err != nil {
+			return err
+		}
+
+		w := transport.NewWrapper(
+			listener.Routing.Type,
+			&transport.Picker{p},
+		)
+
+		if err := rt.reload(
+			listener.Address,
+			w.Picker,
+			w.Inspector,
+		); err != nil {
+			return err
+		}
+	}
+
+    
 	rt.RegisterClusters(newClusters)
+	timeout := time.Duration(rt.environment.HealthCheckTimeout.Load())
+    rt.StartHealthChecks(timeout)
 
-    // swap transports
-    for _, listener := range cfg.Listeners {
+	timeout = time.Duration(rt.environment.DrainTimeout.Load())
+	for _, lb := range old.clusters {
+		for _, backend := range lb.Backends() {
+			backend.StartDrain(
+				timeout,
+				health.Removed,
+			)
+		}
+	}
 
-        p, err := config.NewPicker(
-            listener,
-            newClusters,
-        )
-        if err != nil {
-            return err
-        }
-
-        w := transport.NewWrapper(
-            listener.Routing.Type,
-            p,
-        )
-
-        if err := rt.reload(
-            listener.Address,
-            w.Picker,
-            w.Inspector,
-        ); err != nil {
-            return err
-        }
-    }
-
-    return nil
+	return nil
 }

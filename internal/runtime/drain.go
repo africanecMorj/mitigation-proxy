@@ -11,19 +11,19 @@ import (
 func (rt *Runtime) Drain(
 	cluster string,
 	address string,
-	timeout time.Duration,
 ) error {
 
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	snap := rt.clusters.Load()
 
-	bl, ok := rt.clusters[cluster]
+	bl, ok := snap.clusters[cluster]
 	if !ok {
 		return fmt.Errorf(
 			"cluster %s not found",
 			cluster,
 		)
 	}
+
+	timeout := time.Duration(rt.environment.DrainTimeout.Load())
 
 	for _, b := range bl.Backends() {
 		if address == "*" {
@@ -52,10 +52,9 @@ func (rt *Runtime) Undrain(
 	address string,
 ) error {
 
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	clusters := rt.clusters.Load()
 
-	bl, ok := rt.clusters[cluster]
+	bl, ok := clusters.clusters[cluster]
 	if !ok {
 		return fmt.Errorf(
 			"cluster %s not found",

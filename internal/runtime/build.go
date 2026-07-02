@@ -1,16 +1,21 @@
 package runtime
 
 import (
-	"net"
-	"strconv"
-
-	"golang.org/x/sys/unix"
+	"time"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/config"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/logger"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/metrics"
+	"github.com/africanecMorj/mitigation-proxy.git/pkg"
 )
 
-func (rt *Runtime) Build(cfg *config.Config) error {
+func (rt *Runtime) Build(cfg *config.Config, metri metrics.Server) error {
+
+	if err := rt.applyGlobals(cfg); err != nil {
+		return err
+	}
+
 	clusters, err := config.BuildClusters(cfg)
 	if err != nil {
 		return err
@@ -18,79 +23,41 @@ func (rt *Runtime) Build(cfg *config.Config) error {
 
 	rt.RegisterClusters(clusters)
 
-	for _, balancer := range clusters {
-		for _, backend := range balancer.Backends() {
-			rt.wg.Add(1)
-			go rt.WatchBackend(balancer, backend)
-		}
-	}
+	for _, listener := range cfg.Listeners {
 
-	for _, l := range cfg.Listeners {
-		
-		fd, err := buildListener(l.Address)
+		fd, err := pkg.BuildListener(listener.Address)
 		if err != nil {
 			return err
 		}
 
-		p, err := config.NewPicker(l, clusters)
+		p, err := config.NewPicker(
+			listener,
+			clusters,
+		)
 		if err != nil {
 			return err
 		}
 
 		w := transport.NewWrapper(
-    		l.Routing.Type,
-    		p,
+			listener.Routing.Type,
+			&transport.Picker{p},
 		)
 
-		tr, err := transport.New(&w)
+		log := logger.NewPretty(rt.environment.Dev.Load())
+
+		tr, err := transport.New(&w, log)
 		if err != nil {
 			return err
 		}
 
-		
-		rt.Register(l.Address, tr)
+		rt.Register(listener.Address, tr)
 		go tr.Run(fd)
-
 	}
 
-
+	metri.Run()
+	timeout := time.Duration(rt.environment.HealthCheckTimeout.Load())
+    rt.StartHealthChecks(timeout)
+	
 	return nil
-
 }
 
-func buildListener (a string) (int, error){
-		fd, err := unix.Socket(
-			unix.AF_INET,
-			unix.SOCK_STREAM|unix.SOCK_NONBLOCK,
-			0,
-		)
-		if err != nil {
-			return 0, err
-		}
-
-		unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-
-		host, portStr, err := net.SplitHostPort(a)
-		if err != nil {
-			return 0, err
-		}
-
-		port, _ := strconv.Atoi(portStr)
-
-		ip := net.ParseIP(host).To4()
-
-		addr := &unix.SockaddrInet4{
-			Port: port,
-		}
-		copy(addr.Addr[:], ip)
-
-		if err := unix.Bind(fd, addr); err != nil {
-			return 0, err
-		}
-
-		if err := unix.Listen(fd, 1024); err != nil {
-			return 0, err
-		}
-
-		return fd, nil
-}

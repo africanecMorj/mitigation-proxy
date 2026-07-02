@@ -1,8 +1,8 @@
 package runtime
 
 import (
-
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
+
 	"time"
 )
 
@@ -24,12 +24,9 @@ type BackendStats struct {
 }
 
 func (rt *Runtime) Stats() map[string][]BackendStats {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-
 	stats := make(map[string][]BackendStats)
 
-	for clusterName, balancer := range rt.clusters {
+	for clusterName, balancer := range rt.clusters.Load().clusters {
 		for _, b := range balancer.Backends() {
 			stats[clusterName] = append(
 				stats[clusterName],
@@ -42,12 +39,12 @@ func (rt *Runtime) Stats() map[string][]BackendStats {
 }
 
 func (rt *Runtime) StatsCluster(cluster string) map[string][]BackendStats {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
 
 	stats := make(map[string][]BackendStats)
 
-	balancer, ok := rt.clusters[cluster]
+	snap := rt.clusters.Load()
+
+	balancer, ok := snap.clusters[cluster]
 	if !ok {
 		return stats
 	}
@@ -64,12 +61,12 @@ func (rt *Runtime) StatsCluster(cluster string) map[string][]BackendStats {
 }
 
 func (rt *Runtime) StatsBackend(cluster, address string) map[string][]BackendStats {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
 
 	stats := make(map[string][]BackendStats)
 
-	balancer, ok := rt.clusters[cluster]
+	snap := rt.clusters.Load()
+
+	balancer, ok := snap.clusters[cluster]
 	if !ok {
 		return stats
 	}
@@ -109,7 +106,7 @@ func buildBackendStats(b *health.Backend) BackendStats {
 		).String(),
 
 		AvgLatency: time.Duration(
-			b.AvgLatency(),
+			b.Latency(),
 		).String(),
 
 		EWMATTFB: time.Duration(

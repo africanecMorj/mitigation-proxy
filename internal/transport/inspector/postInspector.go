@@ -2,107 +2,158 @@ package inspector
 
 import (
         "io"
-        
+
         "github.com/africanecMorj/mitigation-proxy.git/pkg"
         "golang.org/x/sys/unix"
 )
 
+type PostgresMessageType int
+
+const (
+	PostgresUnknown PostgresMessageType = iota
+	PostgresSSLRequest
+	PostgresCancelRequest
+	PostgresStartupMessage
+)
+
+
 type Postgres struct {
-        buf      []byte
-        user     string
-        database string
-        params   map[string]string
+	buf      []byte
+
+	msgType  PostgresMessageType
+
+	user     string
+	database string
+	params   map[string]string
 }
 
 
 func (p *Postgres) Read(fd int) (bool, error) {
+	tmp := make([]byte, 4096)
 
-        tmp := make([]byte, 4096)
+	for {
+		n, err := unix.Read(fd, tmp[:])
 
-        for {
+		if err != nil {
+			if err == unix.EINTR {
+				continue
+			}
 
-                n, err := unix.Read(fd, tmp)
+			if err == unix.EAGAIN {
+				return false, nil
+			}
 
-                if err != nil {
+			return false, err
+		}
 
-                        if err == unix.EINTR {
-                                continue
-                        }
+		if n == 0 {
+			return false, io.EOF
+		}
 
-                        if err == unix.EAGAIN {
-                                return false, nil
-                        }
+		p.buf = append(p.buf, tmp[:n]...)
 
-                        return false, err
-                }
+		if len(p.buf) < 8 {
+			continue
+		}
 
-
-                if n == 0 {
-                        return false, io.EOF
-                }
-
-
-                p.buf = append(p.buf, tmp[:n]...)
-
-
-                // postgres packet header
-                if len(p.buf) >= 4 {
-
-                        length :=
-                                int(p.buf[0])<<24 |
-                                int(p.buf[1])<<16 |
-                                int(p.buf[2])<<8 |
-                                int(p.buf[3])
+		length :=
+			int(p.buf[0])<<24 |
+				int(p.buf[1])<<16 |
+				int(p.buf[2])<<8 |
+				int(p.buf[3])
 
 
-                        if len(p.buf) >= length {
+		if length < 8 {
+			return false, pkg.ErrNotPostgres
+		}
+
+		if len(p.buf) < length {
+			continue
+		}
 
 
-                                startup := p.buf[:length]
+		version :=
+			int(p.buf[4])<<24 |
+				int(p.buf[5])<<16 |
+				int(p.buf[6])<<8 |
+				int(p.buf[7])
 
+		switch version {
 
-                                info, err := pkg.ParsePostgresStartup(startup)
+		case 80877103:
+			p.msgType = PostgresSSLRequest
+			return true, nil
 
-                                if err == nil {
+		case 80877102:
+			p.msgType = PostgresCancelRequest
+			return true, nil
 
-                                        p.user = info.User
-                                        p.database = info.Database
-                                        p.params = info.Params
+		case 196608:
+			p.msgType = PostgresStartupMessage
 
-                                }
+			info, err := pkg.ParsePostgresStartup(
+				p.buf[:length],
+			)
 
+			if err != nil {
+				return false, err
+			}
 
-                                return true,nil
-                        }
-                }
-        }
+			p.user = info.User
+			p.database = info.Database
+			p.params = info.Params
+
+			return true, nil
+
+		default:
+			return false, pkg.ErrNotPostgres
+		}
+	}
 }
 
+func NewPostgres() Inspector {
 
-func NewPostgres() *Postgres {
+	return &Postgres{
+		buf: acquirePreBuf(),
 
-        return &Postgres{
-                buf: acquirePreBuf(),
-                params: make(map[string]string),
-        }
+		params: make(map[string]string),
+	}
 }
 
 
 
 func (p *Postgres) RouteKey() RouteInfo {
+	meta := make(map[string]string)
 
-        return RouteInfo{
-				Protocol: PostgresProto
+	for k, v := range p.params {
+		meta[k] = v
+	}
 
-				Meta: map[string]string{
-					"user": p.user,
-                	"database": p.database,
-                	"params": p.params
-				}
-                
-        }
+	switch p.msgType {
+
+	case PostgresSSLRequest:
+		meta["pg_type"] = "ssl_request"
+
+	case PostgresCancelRequest:
+		meta["pg_type"] = "cancel_request"
+
+	case PostgresStartupMessage:
+		meta["pg_type"] = "startup"
+	}
+
+	if p.user != "" {
+		meta["user"] = p.user
+	}
+
+	if p.database != "" {
+		meta["database"] = p.database
+	}
+
+	return RouteInfo{
+		Protocol: PostgresProto,
+		Meta:     meta,
+	}
 }
-
 
 
 func (p *Postgres) Data() []byte {

@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"errors"
 	"io"
 
 	"golang.org/x/sys/unix"
@@ -33,8 +32,8 @@ func (s *Splicer) Transfer(src, dst int) SpliceResult {
 		progress := false
 		srcEOF := false
 
-		// fill pipe
 		for s.buf < pipeSize {
+
 			n, err := unix.Splice(
 				src, nil,
 				s.pipe.w, nil,
@@ -42,11 +41,11 @@ func (s *Splicer) Transfer(src, dst int) SpliceResult {
 				unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK,
 			)
 
-			if errors.Is(err, unix.EINTR) {
+			if err == unix.EINTR {
 				continue
 			}
 
-			if errors.Is(err, unix.EAGAIN) {
+			if err == unix.EAGAIN {
 				if s.buf == 0 {
 					res.NeedRead = true
 				}
@@ -64,12 +63,12 @@ func (s *Splicer) Transfer(src, dst int) SpliceResult {
 			}
 
 			s.buf += int(n)
-			res.Bytes += int64(n)
 			progress = true
 		}
 
-		// flush pipe
+
 		for s.buf > 0 {
+
 			n, err := unix.Splice(
 				s.pipe.r, nil,
 				dst, nil,
@@ -77,11 +76,11 @@ func (s *Splicer) Transfer(src, dst int) SpliceResult {
 				unix.SPLICE_F_MOVE|unix.SPLICE_F_NONBLOCK,
 			)
 
-			if errors.Is(err, unix.EINTR) {
+			if err == unix.EINTR {
 				continue
 			}
 
-			if errors.Is(err, unix.EAGAIN) {
+			if err == unix.EAGAIN {
 				res.NeedWrite = true
 				return res
 			}
@@ -91,18 +90,24 @@ func (s *Splicer) Transfer(src, dst int) SpliceResult {
 				return res
 			}
 
+			if n == 0 {
+				break
+			}
+
 			s.buf -= int(n)
+			res.Bytes += int64(n)
 			progress = true
 		}
 
-		if srcEOF {
+
+		if srcEOF && s.buf == 0 {
 			res.Err = io.EOF
 			return res
 		}
+
 
 		if !progress {
 			return res
 		}
 	}
-
 }

@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"log"
 	"net"
 	"time"
 
@@ -27,50 +26,85 @@ func (l *EventLoop) Picker() BackendPicker {
 }
 
 func (l *EventLoop) updateInterest(c *Conn) {
-	clientEvents := baseEvents
-	backendEvents := baseEvents
+	clientEvents := uint32(
+		unix.EPOLLET |
+		unix.EPOLLRDHUP |
+		unix.EPOLLHUP |
+		unix.EPOLLERR,	
+	)
 
-	if c.clientFD > 0 {
+	backendEvents := uint32(
+		unix.EPOLLET |
+		unix.EPOLLRDHUP |
+		unix.EPOLLHUP |
+		unix.EPOLLERR,
+	)
+	if c.clientFD >= 0 {
+		if !c.clientClosedRead {
+    		clientEvents |= unix.EPOLLIN
+		}
 
 		if c.clientWantsWrite {
 			clientEvents |= unix.EPOLLOUT
 		}
 
 		if err := l.mod(c.clientFD, clientEvents); err != nil {
-			log.Printf("epoll mod client fd=%d err=%v", c.clientFD, err)
+			l.logger.Error(
+				"epoll modify client failed",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"fd": c.clientFD,
+					"error": err.Error(),
+				},
+			)
+
 			l.failAndClose(c)
 			return
 		}
 	}
 
-	if c.backendFD > 0 {
+	if c.backendFD >= 0 {
+		if !c.backendClosedRead {
+    		backendEvents |= unix.EPOLLIN
+		}
+
 
 		if c.backendWantsWrite {
 			backendEvents |= unix.EPOLLOUT
 		}
 
 		if err := l.mod(c.backendFD, backendEvents); err != nil {
-			log.Printf("epoll mod client fd=%d err=%v", c.clientFD, err)
+			l.logger.Error(
+				"epoll modify backend failed",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"fd": c.backendFD,
+					"error": err.Error(),
+				},
+			)
+
 			l.failAndClose(c)
 			return
 		}
 	}
 }
 
-func (l *EventLoop) registerConn(c *Conn) {
-	l.conns[c.clientFD] = c
-	l.conns[c.backendFD] = c
-
-	l.add(c.clientFD, unix.EPOLLIN)
-	l.add(c.backendFD, unix.EPOLLIN)
-
-	c.backend.ActiveConnections.Add(1)
-}
-
 func (l *EventLoop) maybeClose(c *Conn) {
-	if c.clientClosedRead && c.backendClosedRead {
-		l.closeConn(c)
+	if !c.clientClosedRead ||
+	   !c.backendClosedRead {
+		return
 	}
+
+	if c.c2b != nil && c.c2b.buf > 0 {
+		return
+	}
+
+	if c.b2c != nil && c.b2c.buf > 0 {
+		return
+	}
+	
+	l.closeConn(c)
+	
 }
 
 func (l *EventLoop) closeConn(c *Conn) {
@@ -109,6 +143,11 @@ func (l *EventLoop) closeConn(c *Conn) {
 		releasePipe(c.b2c.pipe)
 	}
 
+	
+	if c.inspector != nil {
+		c.inspector.Close()
+	}
+
 	releaseConn(c)
 }
 
@@ -117,6 +156,16 @@ func (l *EventLoop) failAndClose(c *Conn) {
 		return
 	}
 	c.closed = true
+
+	l.logger.Error(
+		"connection failed",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"client_fd": c.clientFD,
+			"backend_fd": c.backendFD,
+		},
+	)
+
 
 	if c.clientFD >= 0 {
 		l.del(c.clientFD)
@@ -133,9 +182,8 @@ func (l *EventLoop) failAndClose(c *Conn) {
 	if c.backend != nil {
 		if c.activeCounted {
 			c.backend.ActiveConnections.Add(-1)
-
-			c.backend.MarkFailure()
 		}
+		c.backend.MarkFailure()
 	}
 
 	if c.c2b != nil {
@@ -144,6 +192,10 @@ func (l *EventLoop) failAndClose(c *Conn) {
 
 	if c.b2c != nil {
 		releasePipe(c.b2c.pipe)
+	}
+
+	if c.inspector != nil {
+		c.inspector.Close()
 	}
 
 	releaseConn(c)
@@ -180,11 +232,13 @@ func (l *EventLoop) add(fd int, events uint32) error {
 		},
 	)
 
-	log.Printf(
-		"EPOLL ADD fd=%d events=%#x err=%v",
-		fd,
-		events,
-		err,
+	l.logger.Debug(
+		"epoll add",
+		map[string]interface{}{
+			"fd": fd,
+			"events": events,
+			"error": err,
+		},
 	)
 
 	return err
@@ -195,11 +249,13 @@ func (l *EventLoop) del(fd int) {
 }
 
 func isConnected(fd int) bool {
-	errno, err := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ERROR)
-	if err != nil {
-		return false
-	}
-	return errno == 0
+	soErr, _ := unix.GetsockoptInt(
+		fd,
+		unix.SOL_SOCKET,
+		unix.SO_ERROR,
+	)
+
+	return soErr == 0
 }
 
 func ipString(sa unix.Sockaddr) string {
@@ -217,8 +273,8 @@ func ipString(sa unix.Sockaddr) string {
 }
 
 func resetConn(c *Conn) {
-	c.clientFD = 0
-	c.backendFD = 0
+	c.clientFD = -1
+    c.backendFD = -1
 
 	c.start = time.Time{}
 	c.firstBackendByte = false
@@ -238,5 +294,9 @@ func resetConn(c *Conn) {
 	c.c2b = nil
 	c.b2c = nil
 
+	c.inspector = nil
+	
 	c.closed = false
 }
+
+

@@ -18,10 +18,10 @@ type TLS struct {
 
 
 func (t *TLS) Read(fd int) (bool, error) {
-	tmp := make([]byte, 4096)
+	var tmp [4096]byte
 
 	for {
-		n, err := unix.Read(fd, tmp)
+		n, err := unix.Read(fd, tmp[:])
 
 		if err != nil {
 
@@ -61,7 +61,7 @@ func (t *TLS) Read(fd int) (bool, error) {
 	}
 }
 
-func NewTLS() *TLS {
+func NewTLS() Inspector {
 	return &TLS{
 		buf: acquirePreBuf(),
 	}
@@ -69,7 +69,8 @@ func NewTLS() *TLS {
 
 func (t *TLS) RouteKey() RouteInfo {
 	return RouteInfo {
-		SNI: t.sni,
+		Protocol:TLSProto,
+		Host: t.sni,
 		ALPN: t.alpn,
 	}
 }

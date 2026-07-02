@@ -17,11 +17,13 @@ type Pipe struct {
 var pipePool = sync.Pool{
 	New: func() any {
 		fds := make([]int, 2)
-		if err := unix.Pipe(fds); err != nil {
+		if err := unix.Pipe2(fds, unix.O_NONBLOCK|unix.O_CLOEXEC); err != nil {
 			panic(err)
 		}
 
-		unix.FcntlInt(uintptr(fds[0]), unix.F_SETPIPE_SZ, pipeSize)
+		if _, err := unix.FcntlInt(uintptr(fds[0]), unix.F_SETPIPE_SZ, pipeSize); err != nil {
+			panic(err)
+		}
 
 		return &Pipe{r: fds[0], w: fds[1]}
 	},

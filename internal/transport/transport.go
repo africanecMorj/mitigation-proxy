@@ -3,6 +3,7 @@ package transport
 import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport/inspector"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/logger"
 
 	"golang.org/x/sys/unix"
 )
@@ -10,13 +11,15 @@ import (
 type BackendDialer func() (int, error)
 
 type BackendPicker interface {
-	Pick(sni, host string, alpn []string, clientIP string) (*health.Backend, int, error)
+	Pick(r *inspector.RouteInfo, clientIP string) (*health.Backend, int, error)
 }
 
 type Wrapper struct {
 	Picker    BackendPicker
-	Inspector inspector.Inspector
+	Inspector InspectorFactory
 }
+
+type InspectorFactory func() inspector.Inspector
 
 func NewWrapper(
     proto string,
@@ -26,56 +29,113 @@ func NewWrapper(
     switch proto {
     case "tls":
         return Wrapper{
-            Inspector: inspector.NewTLS(),
+            Inspector: inspector.NewTLS,
             Picker:    p,
         }
 
     case "http":
         return Wrapper{
-            Inspector: inspector.NewHTTP(),
+            Inspector: inspector.NewHTTP,
+            Picker:    p,
+        }
+
+    case "postgres":
+        return Wrapper{
+            Inspector: inspector.NewPostgres,
             Picker:    p,
         }
 
     case "quic":
         return Wrapper{
-            Inspector: inspector.NewQUIC(),
+            Inspector: inspector.NewQUIC,
             Picker:    p,
         }
 
     default:
         return Wrapper{
-            Inspector: inspector.NewTCP(),
+            Inspector: inspector.NewTCP,
             Picker:    p,
         }
     }
 }
 
 type Transport struct {
+    id         uint64
     listenerFD int
-	loop *EventLoop
+    loop       *EventLoop
+    logger     logger.Logger
 }
 
-func New(w *Wrapper) (*Transport, error) {
-	loop, err := NewEventLoop(w)
-	if err != nil {
-		return nil, err
-	}
+func New(
+    w *Wrapper,
+    l logger.Logger,
+) (*Transport, error) {
 
-	return &Transport{loop: loop}, nil
+    loop, err := NewEventLoop(w, l)
+    if err != nil {
+        return nil, err
+    }
+
+    l.Info(
+        "transport created",
+        map[string]interface{}{
+            "transport_id": logger.NextID(),
+        },
+    )
+
+    return &Transport{
+        id:     logger.NextID(),
+        loop:   loop,
+        logger: l,
+    }, nil
 }
 
 func (t *Transport) Run(listenerFD int) error {
-	t.listenerFD = listenerFD
-    return t.loop.Run(listenerFD)
+    t.listenerFD = listenerFD
+
+    t.logger.Info(
+        "transport started",
+        map[string]interface{}{
+            "transport_id": t.id,
+            "listener_fd": listenerFD,
+        },
+    )
+
+    err := t.loop.Run(listenerFD)
+
+    if err != nil {
+        t.logger.Error(
+            "transport stopped",
+            map[string]interface{}{
+                "transport_id": t.id,
+                "error": err.Error(),
+            },
+        )
+    }
+
+    return err
 }
 
-func (t *Transport) Reload(
-	w *Wrapper,
-) {
-	t.loop.picker.Store(w.Picker)
-	t.loop.inspector.Store(w.Inspector)
+func (t *Transport) Reload(w *Wrapper) {
+    t.logger.Info(
+        "transport reload",
+        map[string]interface{}{
+            "transport_id": t.id,
+        },
+    )
+
+    t.loop.picker.Store(w.Picker)
+    t.loop.inspector.Store(w.Inspector)
 }
 
 func (t *Transport) Close() {
-	unix.Close(t.listenerFD)
+    t.logger.Info(
+        "transport closing",
+        map[string]interface{}{
+            "transport_id": t.id,
+            "fd": t.listenerFD,
+        },
+    )
+
+    unix.Close(t.listenerFD)
 }

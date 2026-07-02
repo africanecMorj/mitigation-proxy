@@ -91,7 +91,7 @@ func isQUICInitial(pkt []byte) bool {
 
 
 
-func NewQUIC() *QUIC {
+func NewQUIC() Inspector {
 
 	return &QUIC{
 		buf: acquirePreBuf(),
@@ -103,7 +103,7 @@ func NewQUIC() *QUIC {
 func (q *QUIC) RouteKey() RouteInfo {
 
 	return RouteInfo{
-		SNI:  q.sni,
+		Host:  q.sni,
 		ALPN: q.alpn,
 	}
 }

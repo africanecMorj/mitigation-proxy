@@ -2,7 +2,7 @@ package inspector
 
 type TCP struct{}
 
-func NewTCP() *TCP {
+func NewTCP() Inspector {
 	return &TCP{}
 }
 
@@ -11,7 +11,9 @@ func (t *TCP) Read(fd int) (bool, error) {
 }
 
 func (t *TCP) RouteKey() RouteInfo {
-	return RouteInfo{}
+	return RouteInfo{
+		Protocol:RawTCPProto,
+	}
 }
 
 func (t *TCP) Data() []byte {

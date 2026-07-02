@@ -3,7 +3,6 @@ package inspector
 import (
 	"golang.org/x/sys/unix"
 
-	"log"
 	"bytes"
 	"io"
 	"errors"
@@ -106,7 +105,7 @@ func parseHost(headers []byte) (string, error) {
 	return host, nil
 }
 
-func NewHTTP() *HTTP {
+func NewHTTP() Inspector {
 	return &HTTP{
 		buf: acquirePreBuf(),
 	}
@@ -114,6 +113,7 @@ func NewHTTP() *HTTP {
 
 func (h *HTTP) RouteKey() RouteInfo {
 	return RouteInfo {
+		Protocol:HTTPProto,
 		Host: h.host,
 	}
 }

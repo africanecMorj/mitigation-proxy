@@ -3,23 +3,30 @@ package transport
 import (
 	"time"
 	"io"
-	"log"
 	"errors"
 	"sync/atomic"
+
+	"github.com/africanecMorj/mitigation-proxy.git/internal/logger"
 
 	"golang.org/x/sys/unix"
 
 )
 
 type EventLoop struct {
-	epfd   int
-	conns  map[int]*Conn
-	picker atomic.Value
-    inspector atomic.Value
+	epfd int
+	conns map[int]*Conn
 
+	picker atomic.Value
+	inspector atomic.Value
+
+	logger logger.Logger
 }
 
-func NewEventLoop(w *Wrapper) (*EventLoop, error) {
+func NewEventLoop(
+	w *Wrapper,
+	l logger.Logger,
+) (*EventLoop, error) {
+
 	epfd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
 	if err != nil {
 		return nil, err
@@ -27,11 +34,19 @@ func NewEventLoop(w *Wrapper) (*EventLoop, error) {
 
 	e := EventLoop{
 		epfd:   epfd,
-		conns:  make(map[int]*Conn),
+		conns: make(map[int]*Conn),
+		logger: l,
 	}
 
 	e.picker.Store(w.Picker)
 	e.inspector.Store(w.Inspector)
+
+	l.Info(
+		"event loop created",
+		map[string]interface{}{
+			"epfd": epfd,
+		},
+	)
 
 	return &e, nil
 }
@@ -48,6 +63,8 @@ func (l *EventLoop) Run(listenerFD int) error {
 		Events: unix.EPOLLIN | unix.EPOLLET,
 		Fd:     int32(listenerFD),
 	})
+
+	defer unix.Close(l.epfd)
 
 	events := make([]unix.EpollEvent, 1024)
 
@@ -72,13 +89,16 @@ func (l *EventLoop) Run(listenerFD int) error {
 			if c == nil {
 				continue
 			}
-			log.Printf(
-				"EPOLL fd=%d events=%#x client=%d backend=%d state=%v",
-				fd,
-				events[i].Events,
-				c.clientFD,
-				c.backendFD,
-				c.state,
+			l.logger.Debug(
+				"epoll event",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"fd": fd,
+					"events": events[i].Events,
+					"client_fd": c.clientFD,
+					"backend_fd": c.backendFD,
+					"state": c.state,
+				},
 			)
 
 			if events[i].Events&(unix.EPOLLERR) != 0 {
@@ -107,13 +127,24 @@ func (l *EventLoop) acceptLoop(listenerFD int) {
 		c := acquireConn()
 
 		*c = Conn{
+			id: logger.NextConnectionID(),
 			clientFD:   nfd,
 			clientAddr: sa,
 			start:     time.Now(),
+			inspector: l.inspector.Load().(InspectorFactory)(),
 			state:     StateInspecting,
 		}
 
 		l.conns[nfd] = c
+
+		l.logger.Info(
+			"connection accepted",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"client_fd": nfd,
+				"address": sa,
+			},
+		)
 
 		if err := l.add(nfd, unix.EPOLLIN); err != nil {
     		unix.Close(nfd)
@@ -151,14 +182,26 @@ func (l *EventLoop) handleIO(c *Conn, fd int) {
 
 
 func (l* EventLoop) handleInspecting(c *Conn) {
-	done, err := l.Inspector().Read(
+	done, err := c.inspector.Read(
 		c.clientFD,
 	)
 
-	log.Printf("sniff result: done=%v, err=%v", done, err)
+	l.logger.Info(
+		"inspection result",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"done": done,
+		},
+	)
 
 	if err != nil {
-	
+		l.logger.Error(
+			"inspection failed",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"error": err,
+			},
+		)
 		if errors.Is(err, io.EOF) {
     		l.closeConn(c)
     		return
@@ -172,21 +215,43 @@ func (l* EventLoop) handleInspecting(c *Conn) {
 		return 
 	}
 
+	
+
 	c.state = StateRouting
 }
 
 func (l *EventLoop) handleRouting(c *Conn) {
 	ip := ipString(c.clientAddr)
 
-	info := l.Inspector().RouteKey()
-	log.Printf("Routeinfo:%+v", info)
+	info := c.inspector.RouteKey()
+	l.logger.Info(
+		"route info",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"host": info.Host,
+		},
+	)
 
-	backend, bfd, err := l.Picker().Pick(info.SNI, info.Host, info.ALPN, ip)
+	backend, bfd, err := l.Picker().Pick(&info, ip)
 	if err != nil {
+		l.logger.Error(
+			"routing failed",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"error": err,
+			},
+		)
 		l.failAndClose(c)
 		return
 	}
-	log.Printf("backend selected address: %+v", backend.Address)
+	
+	l.logger.Info(
+		"backend selected",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"backend": backend.Address,
+		},
+	)
 	
 	c.start = time.Now()
 
@@ -199,26 +264,44 @@ func (l *EventLoop) handleRouting(c *Conn) {
 	l.conns[bfd] = c
 
 	if err := l.add(bfd, unix.EPOLLOUT); err != nil {
-    	unix.Close(bfd)
+		l.logger.Error(
+			"routing failed",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"error": err,
+			},
+		)
+		delete(l.conns, bfd)
+		unix.Close(bfd)
     	return 
 	}
-	log.Printf("added backend fd=%d to epoll", bfd)
 
-	log.Printf("routing sni=%s", info.SNI)
+	l.logger.Debug(
+		"backend added to epoll",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"backend_fd": bfd,
+		},
+	)
+
 	c.state = StateConnecting
 }
 
 func (l *EventLoop) handleConnecting(c *Conn, fd int) {
-	log.Printf("ENTER CONNECTING fd=%d", fd)
-	log.Printf(
-    "CONNECTING event_fd=%d backend_fd=%d client_fd=%d",
-    fd,
-    c.backendFD,
-    c.clientFD,
-)
+	l.logger.Info(
+		"backend connecting",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"event_fd": fd,
+			"backend_fd": c.backendFD,
+			"client_fd": c.clientFD,
+		},
+	)
+
 	if fd != c.backendFD {
 		return
 	}
+
 
 	if !isConnected(fd) {
 		if c.backend != nil {
@@ -227,6 +310,7 @@ func (l *EventLoop) handleConnecting(c *Conn, fd int) {
 		l.failAndClose(c)
 		return
 	}
+
 	
 	latency := time.Since(c.start)
 	c.backend.MarkSuccess(latency)
@@ -244,52 +328,75 @@ func (l *EventLoop) handleConnecting(c *Conn, fd int) {
 func (l *EventLoop) handleProxy(c *Conn, fd int) {
 	var res SpliceResult
 
-	log.Printf(
-		"PROXY fd=%d clientFD=%d backendFD=%d",
-		fd,
-		c.clientFD,
-		c.backendFD,
+	l.logger.Info(
+		"proxy transfer",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"fd": fd,
+			"client_fd": c.clientFD,
+			"backend_fd": c.backendFD,
+		},
 	)
 
 	if fd == c.clientFD {
-		log.Printf("CLIENT SIDE")
-	}
 
-	if fd == c.backendFD {
-		log.Printf("BACKEND SIDE")
-	}
-
-	if fd == c.clientFD {
-		log.Println("Succesfully proxied (client)")
 		res = c.c2b.Transfer(c.clientFD, c.backendFD)
+		l.logger.Debug(
+			"splice result",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"fd": fd,
+				"bytes": res.Bytes,
+				"need_read": res.NeedRead,
+				"need_write": res.NeedWrite,
+				"err": res.Err,
+			},
+		)
 
 		if res.Err == io.EOF {
 			c.clientClosedRead = true
+			c.backend.SetBytesSent(res.Bytes)
 			unix.Shutdown(c.backendFD, unix.SHUT_WR)
 		} else {
+
 			c.backendWantsWrite = res.NeedWrite
 		}
 
 	} else {
+		
 		res = c.b2c.Transfer(c.backendFD, c.clientFD)
 		if !c.firstBackendByte && res.Bytes > 0 {
 			c.firstBackendByte = true
+			l.logger.Debug(
+				"splice result",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"fd": fd,
+					"bytes": res.Bytes,
+					"need_read": res.NeedRead,
+					"need_write": res.NeedWrite,
+					"err": res.Err,
+				},
+			)
 
 			ttfb := time.Since(c.start)
 
 			if c.backend != nil {
-				c.backend.SetTTFB(int64(ttfb))
+				c.backend.SetTTFB(ttfb)
 			}
 
-			log.Printf(
-				"backend=%s ttfb=%s",
-				c.backend.Address,
-				ttfb,
+			l.logger.Debug(
+				"backend first byte",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"backend": c.backend.Address,
+					"ttfb": ttfb,
+				},
 			)
 		}
 
-		log.Println("Succesfully proxied (backend)")
 		if res.Err == io.EOF {
+			c.backend.SetBytesReceived(res.Bytes)
 			c.backendClosedRead = true
 			unix.Shutdown(c.clientFD, unix.SHUT_WR)
 		} else {
@@ -298,7 +405,18 @@ func (l *EventLoop) handleProxy(c *Conn, fd int) {
 	}
 
 	if res.Err != nil && res.Err != io.EOF {
-		
+		l.logger.Error(
+			"proxy error",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"fd": fd,
+				"err": res.Err,
+				"bytes": res.Bytes,
+				"need_read": res.NeedRead,
+				"need_write": res.NeedWrite,
+			},
+		)	
+	
 		if c.backend != nil {
 			c.backend.MarkFailure()
 		}
@@ -312,8 +430,16 @@ func (l *EventLoop) handleProxy(c *Conn, fd int) {
 }
 
 func (l *EventLoop) handleSending(c *Conn) error {
-
-	data := l.Inspector().Data()
+	data := c.inspector.Data()
+	l.logger.Info(
+		"State sending",
+		map[string]interface{}{
+			"conn_id": c.id,
+			"sent": c.initialSent,
+			"len":len(data),
+			"record_len": 5 + (int(data[3])<<8 | int(data[4])),
+		},
+	)
 
 
 	for c.initialSent < len(data) {
@@ -323,8 +449,23 @@ func (l *EventLoop) handleSending(c *Conn) error {
 			data[c.initialSent:],
 		)
 
+		l.logger.Debug(
+			"startup write",
+			map[string]interface{}{
+				"conn_id": c.id,
+				"written": n,
+			},
+		)
+
 		if err != nil {
 
+			l.logger.Error(
+			"state sending failed",
+				map[string]interface{}{
+					"conn_id": c.id,
+					"error": err,
+				},
+			)
 			if err == unix.EINTR {
 				continue
 			}
@@ -343,7 +484,10 @@ func (l *EventLoop) handleSending(c *Conn) error {
 		c.initialSent += n
 	}
 
-	l.Inspector().Close()
+	c.backend.SetBytesSent(int64(c.initialSent))
+
+	c.inspector.Close()
+	c.inspector = nil
 
 	c.backendWantsWrite = false
 
@@ -353,3 +497,4 @@ func (l *EventLoop) handleSending(c *Conn) error {
 
 	return nil
 }
+

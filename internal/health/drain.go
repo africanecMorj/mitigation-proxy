@@ -1,79 +1,97 @@
 package health
 
 import (
-	"log"
 	"time"
+
+    "github.com/africanecMorj/mitigation-proxy.git/internal/logger"
 )
 
 func (b *Backend) StartDrain(timeout time.Duration, state BackendState) {
 	if !b.draining.CompareAndSwap(false, true) {
-		log.Printf("monitor drain failed")
+		var log = logger.NewPretty(false)
+		
+		log.Error("drain failed",
+			map[string]interface{}{
+				"backend":b.Address,
+			},
+		)
 		return
 	}
 
 	b.SetState(Draining)
+	b.totalDrains.Add(1)
 
 	b.DrainStartedAt.Store(
 		time.Now().UnixNano(),
 	)
 
-	log.Printf("monitor drain started")
 	go b.monitorDrain(timeout, state)
 }
 
 func (b *Backend) monitorDrain(timeout time.Duration, state BackendState) {
-	log.Printf("monitor drain started %s", b.Address)
+	log := logger.NewPretty(false)
+
+	log.Info("monitor drain started", map[string]interface{}{
+		"backend": b.Address,
+	})
+
 	defer b.draining.Store(false)
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond) 
 	defer ticker.Stop()
 
-	for range ticker.C {
-		log.Printf(
-			"backend=%s active=%d",
-			b.Address,
-			b.ActiveConnections.Load(),
-		)
+	startedNs := b.DrainStartedAt.Load()
+	if startedNs == 0 {
+		log.Error("drain started timestamp missing", map[string]interface{}{
+			"backend": b.Address,
+		})
+		return
+	}
+
+	started := time.Unix(0, startedNs)
+
+	for {
+		elapsed := time.Since(started)
 
 		if b.ActiveConnections.Load() == 0 {
-			log.Printf(
-				"backend %s drain complete",
-				b.Address,
-			)
+			log.Info("drain complete", map[string]interface{}{
+				"backend": b.Address,
+			})
 
-		
-			
 			b.SetState(state)
-			if state == Removed {
+
+			if state == Shutdown {
 				b.Close()
 			}
+
 			return
 		}
 
-		started := time.Unix(
-			0,
-			b.DrainStartedAt.Load(),
-		)
-
-		if time.Since(started) >= timeout {
-
-			log.Printf(
-				"backend %s drain timeout exceeded",
-				b.Address,
-			)
-
+		if elapsed >= timeout {
+			log.Error("drain timeout exceeded", map[string]interface{}{
+				"backend": b.Address,
+			})
 
 			if state == Healthy {
 				b.SetState(Unhealthy)
-				return
-			}	
-			
-			if state == Removed {
-				b.Close()
+			} else {
+				b.SetState(state)
+
+				if state == Shutdown {
+					b.Close()
+				}
 			}
-			b.SetState(state)
+
 			return
 		}
+
+		log.Info("drain progress", map[string]interface{}{
+			"backend": b.Address,
+			"active":  b.ActiveConnections.Load(),
+			"elapsed": elapsed,
+			"timeout": timeout,
+		})
+
+		<-ticker.C
 	}
 }
-

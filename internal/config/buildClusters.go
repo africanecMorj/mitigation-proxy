@@ -6,7 +6,11 @@ import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/health"
 
 	"context"
-	"time"
+)
+
+const (
+	DefaultBackendWeight = int64(1)
+	DefaultBackendTau    = 10
 )
 
 func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
@@ -18,7 +22,23 @@ func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
 		for _, b := range c.Backends {
 			ctx, cancel := context.WithCancel(context.Background())
 
-			be, err := health.NewBackend(b.Address, b.Tau, b.Weight, ctx, cancel)
+			weight := b.Weight
+			if weight <= 0 {
+				weight = DefaultBackendWeight
+			}
+
+			tau := b.Tau
+			if tau <= 0 {
+				tau = DefaultBackendTau
+			}
+
+			be, err := health.NewBackend(
+				b.Address, 
+				tau, 
+				weight, 
+				ctx, 
+				cancel,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -27,19 +47,14 @@ func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
 		}
 
 		var bl balancers.Balancer
-		timeout, _ := time.ParseDuration("10s")
 
 		switch c.LB {
-		case "ewma":
+		case "least_connections":
 			bl = strategies.NewLeastConnections(backends)
-			bl.StartHealthChecks(timeout)
 		case "p2c":
 			bl = strategies.NewP2C(backends)
-			bl.StartHealthChecks(timeout)
 		default:
 			bl = strategies.NewRoundRobin(backends)
-			bl.StartHealthChecks(timeout)
-
 		}
 
 		result[c.Name] = bl

@@ -67,22 +67,26 @@ func (lb *P2C) Next() *health.Backend {
 			penalty = 2
 		}
 
-		ttfb := int64(1)
-
-		if v := backend.TTFBValue(); v != 0 {
-			ttfb = v
-		}
-
-		latency := math.Max(
+		lat := math.Max(
 			backend.EWMA(),
+			1,
+		)
+
+		ttfb := math.Max(
+			backend.TTFBValue(),
 			1,
 		)
 
 		active := backend.ActiveConnections.Load()
 
-		weight := backend.WeightValue()
+		weight := max(float64(backend.WeightValue()), 1)
 
-		score := (float64(latency) + 0.2*float64(ttfb)) * math.Sqrt(float64(active+1)) * penalty / float64(weight)
+		score :=
+			(float64(lat) + float64(ttfb)) *
+			math.Sqrt(float64(active+1)) *
+			penalty
+
+		score /= weight
 
 		if score < bestScore {
 			bestScore = score

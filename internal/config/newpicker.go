@@ -2,76 +2,109 @@ package config
 
 import (
 	"fmt"
-    "strings"
-    "log"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/balancers"
-	"github.com/africanecMorj/mitigation-proxy.git/internal/transport"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/transport/inspector"
+    
 )
 
+type matchInput struct {
+	host string
+	alpn []string
+	meta map[string]string
+}
+
+type MatchRule struct {
+    Matcher Matcher 
+    Balancer balancers.Balancer
+}
+
+type Selector struct {
+    Rules []MatchRule
+    DefaultBalancer balancers.Balancer
+}
+
 func NewPicker(
-    listener Listener,
-    clusters map[string]balancers.Balancer,
-) (*transport.Picker, error) {
+	listener Listener,
+	clusters map[string]balancers.Balancer,
+) (*Selector ,error) {
 
-    p := &transport.Picker{
-        ByALPN: make(map[string]balancers.Balancer),
-        ExactHosts: make(map[string]balancers.Balancer),
-    }
 
-    for _, rule := range listener.Routing.Rules {
-        b, ok := clusters[rule.Cluster]
-        if !ok {
-            return nil, fmt.Errorf(
-                "unknown cluster %q", rule.Cluster,
-            )
-        }
+	p := &Selector{}
 
-        switch {
-		case rule.Host == "*":
-			p.DefaultBalancer = b
 
-		case strings.HasPrefix(rule.Host, "*."):
-			p.WildcardHosts = append(
-				p.WildcardHosts,
-				transport.WildcardRule{
-					Suffix:   strings.TrimPrefix(rule.Host, "*"),
-					Balancer: b,
-				},
+	proto := parseProto(
+		listener.Routing.Type,
+	)
+
+
+	for _, cfgRule := range listener.Routing.Rules {
+
+
+		b,ok := clusters[cfgRule.Cluster]
+
+
+		if !ok {
+			return nil,fmt.Errorf(
+				"unknown cluster %q",
+				cfgRule.Cluster,
 			)
-
-		case rule.Host != "":
-			p.ExactHosts[rule.Host] = b
 		}
 
-        for _, alpn := range rule.ALPN {
-            p.ByALPN[alpn] = b
-        }
 
-        if rule.Default {
+
+		input := matchInput{
+			host: cfgRule.Host,
+			alpn: cfgRule.ALPN,
+			meta: cfgRule.Metadata,
+		}
+
+
+
+		p.Rules = append(
+			p.Rules,
+			MatchRule{
+
+				Matcher:buildMatcher(
+					proto,
+					input,
+				),
+
+				Balancer:b,
+			},
+		)
+
+        if listener.Routing.DefaultCluster != "" {
+            b, ok := clusters[listener.Routing.DefaultCluster]
+            if !ok {
+                return nil, fmt.Errorf(
+                    "unknown default cluster %q",
+                    listener.Routing.DefaultCluster,
+                )
+            }
             p.DefaultBalancer = b
         }
 
-    }
+	}
 
-    if p.DefaultBalancer == nil && listener.Routing.DefaultCluster != "" {
-        b, ok := clusters[listener.Routing.DefaultCluster]
-        if !ok {
-            return nil, fmt.Errorf(
-                "unknown default cluster %q",
-                listener.Routing.DefaultCluster,
-            )
-        }
 
-        p.DefaultBalancer = b
-    }
 
-    log.Printf(
-        "picker created default=%T cluster=%q",
-        p.DefaultBalancer,
-        listener.Routing.DefaultCluster,
-    )
+	return p, nil
+}
 
-    return p, nil
+func (p *Selector) SelectBackend(info *inspector.RouteInfo) (balancers.Balancer, error) {
+	for _, r := range p.Rules {
+		ok := r.Matcher.Match(info)
+
+		if ok {
+			return r.Balancer, nil
+		}
+	}
+
+	if p.DefaultBalancer != nil {
+		return p.DefaultBalancer, nil
+	}
+
+	return nil, fmt.Errorf("no backend matched")
 }
 

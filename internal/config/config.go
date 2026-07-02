@@ -1,7 +1,5 @@
 package config
 
-import "time"
-
 type Config struct {
 	Listeners []Listener `yaml:"listeners"`
 	Clusters  []Cluster  `yaml:"clusters"`
@@ -11,7 +9,6 @@ type Config struct {
 type Listener struct {
 	Name     string  `yaml:"name"`
 	Address  string  `yaml:"address"`
-	Protocol string  `yaml:"protocol"`
 	Routing  Routing `yaml:"routing"`
 }
 
@@ -28,7 +25,7 @@ type Rule struct {
 	ALPN    []string `yaml:"alpn"`
 	Cluster string   `yaml:"cluster"`
 	
-	Metadata map[string]string
+	Metadata map[string]string `yaml:"Metadata"`
 }
 
 type Cluster struct {
@@ -44,14 +41,20 @@ type Backend struct {
 }
 
 type Global struct {
-	Workers int `yaml:"workers"`
+	Prometheus bool `yaml:"prometheus"`
+	Dev	 	   bool `yaml:"dev"`
 
 	Limits struct {
-		MaxConnections int `yaml:"max_connections"`
+		MaxConnections int32 `yaml:"max_connections"`
+		Burst int32 		 `yaml:"burst"`
+		RPS int32   		 `yaml:"per_ip_rps"`
+
 	} `yaml:"limits"`
 
 	Timeouts struct {
-		ClientHello time.Duration `yaml:"client_hello"`
-		Idle        time.Duration `yaml:"idle"`
+		DrainTimeout string `yaml:"drain"`
+		ShutdownTimeout string `yaml:"shutdown"`
+		HealthCheckTimeout string `yaml:"healthcheck"`
+		
 	} `yaml:"timeouts"`
 }

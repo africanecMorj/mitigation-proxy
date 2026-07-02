@@ -5,13 +5,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"go.yaml.in/yaml/v4"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/admin"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/config"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/runtime"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/metrics/prometheus"
+	"github.com/africanecMorj/mitigation-proxy.git/internal/metrics"
 )
 
 func main() {
@@ -25,6 +26,7 @@ func main() {
 		if len(os.Args) < 3 {
 			log.Fatal("usage: heavyrain start <config.yaml>")
 		}
+		
 		start(os.Args[2])
 
 	case "reload":
@@ -52,9 +54,6 @@ func main() {
 			log.Fatal("usage: heavyrain stats <cluster> <backend>")
 		}
 
-
-		
-		
 	case "drain":
 		if len(os.Args) < 4 {
 			log.Fatal("usage: heavyrain drain <cluster> <backend address>")
@@ -75,7 +74,7 @@ func main() {
 	}
 }
 
-func start(configPath string) {
+func start(configPath string) error {
 
 	cfg, err := loadConfig(configPath)
 	if err != nil {
@@ -84,15 +83,35 @@ func start(configPath string) {
 
 	rt := runtime.New()
 
-	if err := rt.Build(cfg); err != nil {
+	adminServer, err := admin.Start(rt)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer adminServer.Close()
+
+	var metrics metrics.Server
+	if cfg.Global.Prometheus {
+		metrics, err = prometheus.Start(":9090", rt)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		metrics = nil
+	}
+	
+
+	if err := rt.Build(cfg, metrics); err != nil {
 		log.Fatal(err)
 	}
 
-	go admin.StartServer(rt)
-
 	waitForShutdown()
 
-	rt.Shutdown(5 * time.Minute)
+	err = rt.Shutdown(rt.ShutdownTimeout(), metrics)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return nil
 }
 
 func waitForShutdown() {

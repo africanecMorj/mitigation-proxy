@@ -11,8 +11,6 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 )
 
-const SocketPath = "/tmp/mitigation.sock"
-
 func Reload(path string) error {
 	conn, err := net.Dial("unix", SocketPath)
 	if err != nil {
@@ -220,8 +218,6 @@ func renderTable (resp map[string][]runtime.BackendStats) {
 				b.EWMALatency,
 				b.EWMATTFB,
 			})
-			// fmt.Println(b)
-
 		}
 
 		t.Render()

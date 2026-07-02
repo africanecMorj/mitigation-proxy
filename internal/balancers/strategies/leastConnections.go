@@ -52,29 +52,37 @@ func (lb *LeastConnections) Next() *health.Backend {
 			penalty = 2
 		}
 
-		ttfb := int64(1)
+		ttfb := math.Max(
+			backend.TTFBValue(),
+			1,
+		)
 
-		if v := backend.TTFBValue(); v != 0 {
-			ttfb = v
-		}
-
-		latency := math.Max(
+		lat := math.Max(
 			backend.EWMA(),
 			1,
 		)
 
 		active := backend.ActiveConnections.Load()
 
-		weight := backend.WeightValue()
-		score := (float64(latency) + 0.2*float64(ttfb)) * float64(ttfb) * math.Sqrt(float64(active+1)) * penalty
-		score += rand.Float64() * 0.01
-		score = score / float64(weight)
+		weight := max(float64(backend.WeightValue()), 1)
+	
+		score :=
+			(float64(lat) + float64(ttfb)) *
+			math.Sqrt(float64(active+1)) *
+			penalty
 
+		score /= weight
+		
 		if score < bestScore {
 			bestScore = score
 			selected = backend
+		} else if math.Abs(score-bestScore) < 1e-9 {
+			if rand.Intn(2) == 0 {
+				selected = backend
+			}
 		}
 	}
 
 	return selected
 }
+

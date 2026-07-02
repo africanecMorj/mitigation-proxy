@@ -18,12 +18,21 @@ func (b *Backend) Failures() uint64 {
 	return uint64(b.TotalFailures.Load())
 }
 
-func (b *Backend) AvgLatency() uint64 {
-	return uint64(b.TotalLatency.Load())
+func (b *Backend) Latency() uint64 {
+	return uint64(b.latency.Load())
+}
+
+func (b *Backend) EWMA() float64 {
+	return b.ewma.Load().value
 }
 
 func (b *Backend) Successes() uint64 {
 	return uint64(b.TotalSuccesses.Load())
+}
+
+func (b *Backend) TotalClosed() uint64 {
+	closed := uint64(b.TotalSuccesses.Load()) + uint64(b.TotalFailures.Load())
+	return closed
 }
 
 func (b *Backend) SetState(state BackendState) {
@@ -31,13 +40,34 @@ func (b *Backend) SetState(state BackendState) {
 	b.LastStateChange.Store(time.Now().UnixNano())
 }
 
-func (b *Backend) TTFBValue() int64 {
-	return int64(b.ttfb.Load())
+func (b *Backend) TTFBValue() float64 {
+	return b.ttfb.Load().value
 }
 
-func (b *Backend) SetTTFB(t int64) {
-	b.ttfb.Store(t)
+func (b *Backend) RawTTFB() uint64 {
+	return uint64(b.rawTtfb.Load())
 }
+
+func (b *Backend) BytesSentValue() int64 {
+	return int64(b.bytesSent.Load())
+}
+
+func (b *Backend) BytesReceivedValue() int64 {
+	return int64(b.bytesReceived.Load())
+}
+
+func (b *Backend) TotalDrains() int64 {
+	return int64(b.totalDrains.Load())
+}
+
+func (b *Backend) SetBytesSent(bytes int64) {
+	b.bytesSent.Add(bytes)
+}
+
+func (b *Backend) SetBytesReceived(bytes int64) {
+	b.bytesReceived.Add(bytes)
+}
+
 
 func (b *Backend) WeightValue() int64 {
 	return int64(b.Weight.Load())

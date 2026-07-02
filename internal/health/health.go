@@ -2,7 +2,6 @@ package health
 
 import (
 	"errors"
-	"log"
 	"math"
 	"time"
 
@@ -10,37 +9,65 @@ import (
 )
 
 func (b *Backend) ObserveLatency(sample time.Duration) {
-	b.ewmaMu.Lock()
-	defer b.ewmaMu.Unlock()
+	now := time.Now().UnixNano()
 
-	now := time.Now()
+	for {
+		old := b.ewma.Load()
 
-	if b.lastEWMAUpdate.IsZero() {
-		b.ewma = float64(sample)
-		b.lastEWMAUpdate = now
-		return
+		next := &ewmaState{}
+
+		if old.last == 0 {
+			next.value = float64(sample)
+			next.last = now
+		} else {
+			dt := float64(now-old.last) / float64(time.Second)
+
+			alpha := math.Exp(-dt / b.Tau)
+
+			next.value =
+				old.value*alpha +
+					float64(sample)*(1-alpha)
+
+			next.last = now
+		}
+
+		if b.ewma.CompareAndSwap(old, next) {
+			break
+		}
 	}
 
-	dt := now.Sub(b.lastEWMAUpdate).Seconds()
-
-	alpha := math.Exp(-dt / b.Tau)
-
-	b.ewma =
-		b.ewma*alpha +
-			float64(sample)*(1-alpha)
-
-	b.lastEWMAUpdate = now
-
-	b.TotalLatency.Add(
-		uint64(sample),
-	)
+	b.latency.Store(uint64(sample))
 }
 
-func (b *Backend) EWMA() float64 {
-	b.ewmaMu.Lock()
-	defer b.ewmaMu.Unlock()
+func (b *Backend) SetTTFB(sample time.Duration) {
+	now := time.Now().UnixNano()
 
-	return b.ewma
+	for {
+		old := b.ttfb.Load()
+
+		next := &ttfbState{}
+
+		if old.last == 0 {
+			next.value = float64(sample)
+			next.last = now
+		} else {
+			dt := float64(now-old.last) / float64(time.Second)
+
+			alpha := math.Exp(-dt / b.Tau)
+
+			next.value =
+				old.value*alpha +
+					float64(sample)*(1-alpha)
+
+			next.last = now
+		}
+
+		if b.ttfb.CompareAndSwap(old, next) {
+			break
+		}
+	}
+
+	b.rawTtfb.Store(uint64(sample))
 }
 
 func (b *Backend) HealthCheck() {
@@ -188,12 +215,6 @@ func (b *Backend) Dial() (int, error) {
 	}
 
 	err = unix.Connect(fd, b.SockAddr)
-	log.Printf(
-		"CONNECT fd=%d addr=%s err=%v",
-		fd,
-		b.Address,
-		err,
-	)
 
 	if err != nil && err != unix.EINPROGRESS {
 		unix.Close(fd)

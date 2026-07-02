@@ -6,7 +6,6 @@ import (
 	"go.yaml.in/yaml/v4"
 	"net"
 	"os"
-	"time"
 
 	"github.com/africanecMorj/mitigation-proxy.git/internal/config"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/runtime"
@@ -28,27 +27,19 @@ func handle(conn net.Conn, rt *runtime.Runtime) {
 		cfg, err := loadConfig(req.Config)
 		if err != nil {
 			err = fmt.Errorf("Reload error:%w", err)
-			json.NewEncoder(conn).Encode(Response{
-				OK:    false,
-				Error: err.Error(),
-			})
-			return
+			onError(err, conn)
+			return 
 		}
 
 		err = rt.Reload(cfg)
 		if err != nil {
 			err = fmt.Errorf("Reload error:%w", err)
-			json.NewEncoder(conn).Encode(Response{
-				OK:    false,
-				Error: err.Error(),
-			})
-			return
+			onError(err, conn)
+			return 
+			
 		}
 
-		json.NewEncoder(conn).Encode(Response{
-			OK:      true,
-			Message: "Successfully reloaded",
-		})
+		onSuccess("Sucessfully reloaded", conn)
 
 	case "stats":
 		var stats map[string][]runtime.BackendStats
@@ -70,21 +61,14 @@ func handle(conn net.Conn, rt *runtime.Runtime) {
 		err := rt.Drain(
 			req.Cluster,
 			req.Backend,
-			30*time.Second,
 		)
 		if err != nil {
 			err = fmt.Errorf("Drain error:%w", err)
-			json.NewEncoder(conn).Encode(Response{
-				OK:    false,
-				Error: err.Error(),
-			})
-			return
+			onError(err, conn)
+			return 
 		}
 
-		json.NewEncoder(conn).Encode(Response{
-			OK:      true,
-			Message: "Drain started",
-		})
+		onSuccess("drain started", conn)
 
 	case "undrain":
 		err := rt.Undrain(
@@ -93,20 +77,29 @@ func handle(conn net.Conn, rt *runtime.Runtime) {
 		)
 		if err != nil {
 			err = fmt.Errorf("Undrain error:%w", err)
-			json.NewEncoder(conn).Encode(Response{
-				OK:    false,
-				Error: err.Error(),
-			})
-			return
+			onError(err, conn)
+			return 
+			
 		}
 
-		json.NewEncoder(conn).Encode(Response{
-			OK:      true,
-			Message: "Successfully undrained",
-		})
+		onSuccess("Successfully undrained", conn)
 	
 	}
 
+}
+
+func onSuccess (msg string, conn net.Conn) {
+	json.NewEncoder(conn).Encode(Response{
+		OK:      true,
+		Message: msg,
+	})
+}
+
+func onError (err error, conn net.Conn) {
+	json.NewEncoder(conn).Encode(Response{
+		OK:    false,
+		Error: err.Error(),
+	})
 }
 
 func loadConfig(path string) (*config.Config, error) {

@@ -2,9 +2,7 @@ package health
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -20,12 +18,25 @@ const (
 	Unhealthy
 	Recovering
 	Removed
+	Shutdown
 )
 
 type BackendPool struct {
 	backend *Backend
 	idle    chan int
 }
+
+type ewmaState struct {
+	value float64
+	last  int64 
+}
+
+type ttfbState struct {
+	value float64
+	last  int64 
+}
+
+
 
 type Backend struct {
 	Address string
@@ -40,6 +51,10 @@ type Backend struct {
 
 	ActiveConnections atomic.Int64
 
+	bytesSent atomic.Int64
+	bytesReceived atomic.Int64
+
+
 	TotalFailures  atomic.Uint64
 	TotalSuccesses atomic.Uint64
 
@@ -52,21 +67,21 @@ type Backend struct {
 	Family   int
 
 	// latency metrics
-	ewmaMu         sync.Mutex
-	ewma           float64
-	lastEWMAUpdate time.Time
+	ewma atomic.Pointer[ewmaState]
+	latency atomic.Uint64
 
-	ttfb atomic.Int64
+	ttfb atomic.Pointer[ttfbState]
+	rawTtfb atomic.Uint64
 
 	Requests atomic.Uint64
 
-	TotalLatency atomic.Uint64
 
 	Ctx    context.Context
 	cancel context.CancelFunc
 
 	// drain protection
 	draining atomic.Bool
+	totalDrains atomic.Int64
 
 	//TODO: pool connection system:
 	pool *BackendPool
@@ -93,6 +108,8 @@ func NewBackend(
 		Ctx:      ctx,
 		cancel:   cancel,
 	}
+	b.ewma.Store(&ewmaState{})
+	b.ttfb.Store(&ttfbState{})
 	b.SetWeight(weight)
 
 	return &b, nil

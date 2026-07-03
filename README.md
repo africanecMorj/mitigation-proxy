@@ -1,228 +1,49 @@
-# Heavyrain Mitigation Proxy
+# HeavyRain
 
-High-performance mitigation proxy for TCP, QUIC, SNI/ALPN routing, backend balancing, traffic control, and runtime backend management.
+HeavyRain is a high-performance Layer 4 proxy and load balancer written in Go.
+
+It supports protocol-aware routing, zero-downtime configuration reloads, graceful backend draining, and multiple load balancing algorithms while keeping the data path as lightweight as possible.
+
+---
 
 ## Features
 
-* TCP proxy
-* QUIC / UDP proxy
-* SNI + ALPN based routing
-* HTTP/2, HTTP/1.1, HTTP/3 support
-* Multiple load balancing algorithms:
-
-  * round_robin
-  * ewma
-  * p2c
-* Backend draining and enabling
-* Connection limits
-* Per-IP rate limiting
-* Runtime configuration reload
-* Metrics and statistics
+- 🚀 High-performance TCP proxy
+- 🔒 TLS SNI routing
+- 🌐 Wildcard host matching
+- 📡 ALPN-based routing (gRPC, HTTP/2, etc.)
+- 🐘 PostgreSQL startup packet routing
+- ⚖️ Multiple load balancing algorithms
+- 🔄 Zero-downtime configuration reload
+- 🩺 Backend draining for maintenance
+- 📊 Runtime statistics
+- ❤️ Passive health monitoring
 
 ---
 
-## Configuration
+# Installation
 
-Example `config.yaml`:
+Build from source:
 
-```yaml
-listeners:
-  - name: main-tcp
-    address: ":4000"
-    protocol: tcp
-
-    routing:
-      type: sni_alpn
-
-      rules:
-        - host: api.example.com
-          alpn: ["h2"]
-          cluster: grpc_cluster
-
-        - host: api.example.com
-          alpn: ["http/1.1"]
-          cluster: rest_cluster
-
-        - host: "*.example.com"
-          cluster: web_cluster
-
-        - default: true
-          cluster: default_cluster
-
-  - name: quic
-    address: ":4433"
-    protocol: udp
-
-    routing:
-      type: quic
-      default_cluster: h3_cluster
-
-
-clusters:
-
-  - name: grpc_cluster
-    lb: ewma
-
-    pool:
-
-    backends:
-      - address: 10.0.0.1:50051
-        weight: 1
-
-      - address: 10.0.0.2:50051
-        weight: 1
-
-
-  - name: rest_cluster
-    lb: ewma
-
-    pool:
-      max_idle: 256
-
-    backends:
-      - address: 127.0.0.1:8080
-
-      - address: 127.0.0.1:8080
-
-
-  - name: web_cluster
-    lb: round_robin
-
-    backends:
-      - address: 127.0.0.1:8080
-
-      - address: 127.0.0.1:8080
-
-
-  - name: h3_cluster
-    lb: p2c
-
-    backends:
-      - address: 127.0.0.1:8080
-
-      - address: 127.0.0.1:8080
-
-
-  - name: default_cluster
-    lb: round_robin
-
-    backends:
-      - address: 127.0.0.1:8080
-
-
-limits:
-  max_connections: 100000
-
-
-ratelimit:
-  per_ip_rps: 100
+```bash
+go build -o heavyrain .
 ```
-
----
-
-# Routing
-
-## SNI / ALPN routing
-
-Traffic can be routed based on TLS SNI hostname and ALPN protocol.
-
-Example:
-
-```
-api.example.com + h2
-        |
-        v
-   grpc_cluster
-
-
-api.example.com + http/1.1
-        |
-        v
-   rest_cluster
-```
-
-Wildcard routing:
-
-```yaml
-- host: "*.example.com"
-  cluster: web_cluster
-```
-
-Default route:
-
-```yaml
-- default: true
-  cluster: default_cluster
-```
-
----
-
-# Load Balancing
-
-## Round Robin
-
-```yaml
-lb: round_robin
-```
-
-Sequential backend selection.
-
----
-
-## EWMA
-
-```yaml
-lb: ewma
-```
-
-Latency-aware balancing algorithm.
-
-Recommended for:
-
-* gRPC services
-* APIs
-* variable latency backends
-
----
-
-## P2C
-
-```yaml
-lb: p2c
-```
-
-Power of Two Choices balancing.
-
-Recommended for:
-
-* large backend pools
-* uneven traffic distribution
 
 ---
 
 # Commands
 
-## Start
-
-Start proxy with configuration:
+Start the proxy:
 
 ```bash
 heavyrain start config.yaml
 ```
 
----
-
-## Reload
-
-Reload configuration without restarting:
+Reload configuration without dropping active connections:
 
 ```bash
 heavyrain reload config.yaml
 ```
-
----
-
-## Statistics
 
 Show runtime statistics:
 
@@ -230,154 +51,318 @@ Show runtime statistics:
 heavyrain stats
 ```
 
----
-
-# Backend Management
-
-## List backends
+Gracefully remove a backend from load balancing:
 
 ```bash
-mitigation backend list
+heavyrain drain <cluster> <address>
 ```
+
+Return a backend back into rotation:
+
+```bash
+heavyrain undrain <cluster> <address>
+```
+
+---
+
+# Configuration
+
+A configuration consists of two primary objects:
+
+- **Listeners** — accept incoming connections and decide where they should be routed.
+- **Clusters** — groups of backend servers together with a load balancing policy.
 
 Example:
 
-```
-cluster          backend        state
+```yaml
+listeners:
+  - name: main-tcp
+    address: 127.0.0.1:4000
 
-grpc_cluster     api-1          enabled
-grpc_cluster     api-2          enabled
+    routing:
+      type: tls
+      rules:
+        - cluster: web
+          host: api.example.com
 
-rest_cluster     rest-1         draining
-```
+  - name: grpc
+    address: 127.0.0.1:4001
 
----
+    routing:
+      type: tls
+      rules:
+        - cluster: grpc
+          alpn:
+            - h2
 
-## Drain backend
+  - name: db
+    address: 127.0.0.1:4002
 
-Remove backend from new traffic while keeping existing connections:
+    routing:
+      type: postgres
+      rules:
+        - cluster: postgres
+          metadata:
+            user: postgres
+            password: veryunsualsecretpassword
 
-```bash
-mitigation backend drain api-1
-```
+clusters:
+  - name: web
+    lb: least_connections
+    backends:
+      - address: 127.0.0.1:8080
+      - address: 127.0.0.1:8081
+      - address: 127.0.0.1:8082
 
-Useful for:
+  - name: grpc
+    lb: p2c
+    backends:
+      - address: 127.0.0.1:5000
+      - address: 127.0.0.1:5001
+      - address: 127.0.0.1:5002
 
-* deployments
-* maintenance
-* graceful shutdown
-
----
-
-## Enable backend
-
-Enable backend traffic:
-
-```bash
-mitigation backend enable api-1
-```
-
----
-
-# Metrics
-
-Show runtime metrics:
-
-```bash
-mitigation metrics
-```
-
-Available metrics include:
-
-```
-connections_active
-
-requests_total
-
-backend_errors_total
-
-backend_latency
-
-rate_limit_dropped
+  - name: postgres
+    lb: least_connections
+    backends:
+      - address: 127.0.0.1:5432
+      - address: 127.0.0.1:5433
 ```
 
 ---
 
-# Limits
+# Routing
 
-Maximum connections:
+HeavyRain supports protocol-aware routing.
+
+## TLS Routing
+
+TLS listeners inspect the ClientHello without terminating TLS.
+
+Routing rules may match on:
+
+- SNI hostname
+- ALPN protocol
+
+Example:
 
 ```yaml
-limits:
-  max_connections: 100000
+routing:
+  type: tls
+  rules:
+    - cluster: web
+      host: api.example.com
+
+    - cluster: grpc
+      alpn:
+        - h2
 ```
 
-Per-IP rate limit:
+No TLS decryption is performed.
+
+---
+
+## Wildcard Hosts
+
+Wildcard matching is supported.
+
+Examples:
 
 ```yaml
-ratelimit:
-  per_ip_rps: 100
+host: "*.example.com"
+```
+
+matches
+
+```
+api.example.com
+cdn.example.com
+foo.example.com
+```
+
+while
+
+```yaml
+host: "api.example.com"
+```
+
+matches only
+
+```
+api.example.com
+```
+
+More specific rules take precedence over broader wildcard rules.
+
+---
+
+## PostgreSQL Routing
+
+HeavyRain can inspect PostgreSQL startup packets before forwarding the connection.
+
+Routing can be performed using startup parameters such as:
+
+- user
+- database
+- application_name
+- and other startup metadata
+
+Example:
+
+```yaml
+routing:
+  type: postgres
+
+  rules:
+    - cluster: postgres
+      metadata:
+        user: postgres
 ```
 
 ---
 
-# Runtime Flow
+# Load Balancing
 
-```
-                Client
+Each cluster uses its own balancing strategy.
 
-                  |
+Currently supported:
 
-                  v
+## Least Connections
 
-          Heavyrain Proxy
+Routes new connections to the backend currently serving the fewest active connections.
 
-                  |
+Recommended for long-lived TCP connections.
 
-        +---------+---------+
-
-        |                   |
-
-     TCP Listener       QUIC Listener
-
-        |                   |
-
-    SNI / ALPN          HTTP/3
-
-        |
-
-   Cluster Selection
-
-        |
-
-   Backend Load Balancer
-
-        |
-
-     Backend Pool
+```yaml
+lb: least_connections
 ```
 
 ---
 
-# Graceful Deployment
+## Power of Two Choices (P2C)
 
-Recommended backend replacement flow:
+Randomly samples two backends and selects the less loaded one.
 
-1. Add new backend
+Provides near-optimal balancing while requiring minimal overhead.
 
-2. Enable backend:
-
-```bash
-mitigation backend enable api-new
+```yaml
+lb: p2c
 ```
 
-3. Drain old backend:
+---
 
-```bash
-mitigation backend drain api-old
+# Backend Lifecycle
+
+Every backend has a runtime lifecycle.
+
+```
+Healthy
+   │
+   ▼
+Draining
+   │
+   ▼
+Removed
 ```
 
-4. Wait for active connections to finish
+## Healthy
+
+The backend receives new connections normally.
+
+---
+
+## Draining
+
+A draining backend:
+
+- stops receiving new connections
+- continues serving existing connections
+- is removed automatically once all active connections finish
+
+Enable draining:
+
+```bash
+heavyrain drain web 127.0.0.1:8080
+```
+
+Cancel draining:
+
+```bash
+heavyrain undrain web 127.0.0.1:8080
+```
+
+This allows rolling deployments without interrupting clients.
+
+---
+
+# Zero-Downtime Reload
+
+Reloading configuration does **not** interrupt existing connections.
+
+```bash
+heavyrain reload config.yaml
+```
+
+During reload HeavyRain:
+
+- reloads listeners
+- updates routing rules
+- updates clusters
+- adds new backends
+- removes obsolete backends gracefully
+- preserves active connections whenever possible
+
+New connections immediately begin using the updated configuration.
+
+---
+
+# Runtime Statistics
+
+Runtime metrics can be displayed with:
+
+```bash
+heavyrain stats
+```
+
+Statistics include information such as:
+
+- active connections
+- backend state
+- bytes transferred
+- connection counters
+- load balancer status
+
+---
+
+# Prometheus Metrics
+
+HeavyRain exposes runtime metrics in the Prometheus exposition format.
+
+Metrics include:
+
+- Active connections
+- Accepted and closed connections
+- Bytes sent and received
+- Backend request counts
+- Backend success and failure counters
+- Active backend connections
+- Backend state (healthy, draining, unavailable)
+- Configuration reloads
+- Drain operations
+
+These metrics can be scraped directly by Prometheus and visualized using Grafana, making it easy to monitor traffic, backend health, and load balancing behavior in production.
+
+---
+
+# Design Goals
+
+HeavyRain is designed around a few simple principles:
+
+- minimal latency
+- zero-copy data forwarding where possible
+- graceful operational workflows
+- protocol-aware routing without protocol termination
+- efficient load balancing for long-lived TCP services
+- safe runtime reconfiguration
 
 ---
 

@@ -6,11 +6,10 @@ import (
 	"github.com/africanecMorj/mitigation-proxy.git/internal/config"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/transport"
 	"github.com/africanecMorj/mitigation-proxy.git/internal/logger"
-	"github.com/africanecMorj/mitigation-proxy.git/internal/metrics"
 	"github.com/africanecMorj/mitigation-proxy.git/pkg"
 )
 
-func (rt *Runtime) Build(cfg *config.Config, metri metrics.Server) error {
+func (rt *Runtime) Build(cfg *config.Config) error {
 
 	if err := rt.applyGlobals(cfg); err != nil {
 		return err
@@ -54,7 +53,6 @@ func (rt *Runtime) Build(cfg *config.Config, metri metrics.Server) error {
 		go tr.Run(fd)
 	}
 
-	metri.Run()
 	timeout := time.Duration(rt.environment.HealthCheckTimeout.Load())
     rt.StartHealthChecks(timeout)
 	

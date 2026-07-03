@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxy
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/heavyrain
+Restart=always
+RestartSec=5
+
+# журнал
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

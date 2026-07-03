@@ -7,7 +7,6 @@ type Config struct {
 }
 
 type Listener struct {
-	Name     string  `yaml:"name"`
 	Address  string  `yaml:"address"`
 	Routing  Routing `yaml:"routing"`
 }

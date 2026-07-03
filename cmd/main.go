@@ -100,7 +100,7 @@ func start(configPath string) error {
 	}
 	
 
-	if err := rt.Build(cfg, metrics); err != nil {
+	if err := rt.Build(cfg); err != nil {
 		log.Fatal(err)
 	}
 

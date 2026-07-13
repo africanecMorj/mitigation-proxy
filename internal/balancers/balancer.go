@@ -8,7 +8,7 @@ import (
 
 
 type Balancer interface {
-	Next() *health.Backend
+	Next(ip string) *health.Backend
 	AddBackend(*health.Backend)
 	RemoveBackend(string)
 	Backends() []*health.Backend

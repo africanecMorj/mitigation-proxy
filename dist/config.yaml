@@ -1,3 +1,4 @@
+version: 2
 project_name: mitigation-proxy
 release:
   github:
@@ -8,12 +9,9 @@ builds:
   - id: mitigation-proxy
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-      - "386"
     goamd64:
       - v1
     go386:
@@ -31,20 +29,19 @@ builds:
     targets:
       - linux_amd64_v1
       - linux_arm64_v8.0
-      - linux_386_sse2
-      - darwin_amd64_v1
-      - darwin_arm64_v8.0
-      - windows_amd64_v1
-      - windows_arm64_v8.0
-      - windows_386_sse2
     dir: .
-    main: .
+    main: ./cmd
     binary: mitigation-proxy
     builder: go
     tool: go
     command: build
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    env:
+      - CGO_ENABLED=0
 archives:
   - id: default
     builds_info:
@@ -59,6 +56,27 @@ archives:
       - src: README*
       - src: changelog*
       - src: CHANGELOG*
+nfpms:
+  - file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
+    package_name: mitigation-proxy
+    contents:
+      - src: systemd/heavyrain.service
+        dst: /usr/lib/systemd/system/heavyrain.service
+    scripts:
+      postinstall: systemd/postinstall.sh
+      preremove: systemd/preremove.sh
+      postremove: systemd/postremove.sh
+    id: default
+    formats:
+      - deb
+      - rpm
+      - apk
+      - ipk
+    bindir: /usr/bin
+    libdirs:
+      header: /usr/include
+      carchive: /usr/lib
+      cshared: /usr/lib
 srpm:
   nfpmrpm: {}
   package_name: mitigation-proxy

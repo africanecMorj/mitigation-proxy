@@ -27,7 +27,7 @@ func (p *Picker) Pick(
         return nil, 0 , err
     }
 
-    b := bl.Next()
+    b := bl.Next(ip)
     if b == nil {
         return nil, 0, errors.New("backend is nil")
     }

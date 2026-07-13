@@ -23,7 +23,7 @@ func NewP2C(
 	}
 }
 
-func (lb *P2C) Next() *health.Backend {
+func (lb *P2C) Next(_ string) *health.Backend {
 	backends := lb.Backends()
 
 	if len(backends) == 0 {

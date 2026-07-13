@@ -23,12 +23,16 @@ func NewLeastConnections(
 	}
 }
 
-func (lb *LeastConnections) Next() *health.Backend {
+func (lb *LeastConnections) Next(_ string) *health.Backend {
 
 	backends := lb.Backends()
 
 	if len(backends) == 0 {
 		return nil
+	}
+
+	if len(backends) == 1 {
+		return backends[0]
 	}
 
 	var (
@@ -37,12 +41,12 @@ func (lb *LeastConnections) Next() *health.Backend {
 	)
 
 	for _, backend := range backends {
-		state := health.BackendState(backend.State.Load())
+		state := backend.StateValue()
 
 		penalty := 1.0
 
 		switch state {
-		case health.Unhealthy, health.Draining, health.Removed:
+		case health.Unhealthy, health.Draining, health.Removed, health.Shutdown:
 			continue
 
 		case health.Recovering:

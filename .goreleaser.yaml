@@ -1,0 +1,42 @@
+version: 2
+
+project_name: mitigation-proxy
+
+builds:
+  - binary: mitigation-proxy
+    main: ./cmd
+    env:
+      - CGO_ENABLED=0
+
+    goos:
+      - linux
+
+    goarch:
+      - amd64
+      - arm64
+
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+
+nfpms:
+  - package_name: mitigation-proxy
+    formats:
+      - deb
+      - rpm
+      - apk
+      - ipk
+
+    contents:
+      - src: systemd/heavyrain.service
+        dst: /usr/lib/systemd/system/heavyrain.service
+
+    scripts:
+      postinstall: systemd/postinstall.sh
+      preremove: systemd/preremove.sh
+      postremove: systemd/postremove.sh

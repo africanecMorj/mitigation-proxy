@@ -6,51 +6,14 @@ listeners:
       type: tls
       rules:
         - cluster: web
-          host: api.example.com
-        
-  - name: grpc
-    address: 127.0.0.1:4001
-
-    routing:
-      type: tls
-      rules:
-        - cluster: grpc
-          alpn:["h2"]
-
-  - name: db
-    address: 127.0.0.1:4002
-
-    routing:
-      type: postgres
-      rules:
-        - cluster: postgres
-          Metadata:
-            user: postgres
-            password: veryunsualsecretpassword
-        
-
-
+          host: "*.example.com"
+      
 clusters:
   - name: web
-    lb: least_connections
+    lb: sticky
     backends:
       - address: 127.0.0.1:8080
       - address: 127.0.0.1:8081
       - address: 127.0.0.1:8082
 
-  - name: grpc
-    lb: p2c
-    backends:
-      - address: 127.0.0.1:5000
-      - address: 127.0.0.1:5001
-      - address: 127.0.0.1:5002
-
-
-- name: postgres
-    lb: least_connections
-    backends:
-      - address: 127.0.0.1:5432
-      - address: 127.0.0.1:5433
-
-
-
+  

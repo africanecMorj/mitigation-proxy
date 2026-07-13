@@ -53,6 +53,8 @@ func BuildClusters(cfg *Config) (map[string]balancers.Balancer, error) {
 			bl = strategies.NewLeastConnections(backends)
 		case "p2c":
 			bl = strategies.NewP2C(backends)
+		case "sticky":
+			bl = strategies.NewSticky(backends)
 		default:
 			bl = strategies.NewRoundRobin(backends)
 		}

@@ -20,8 +20,16 @@ func NewRoundRobin(
 	}
 }
 
-func (rr *RoundRobin) Next() *health.Backend {
+func (rr *RoundRobin) Next(_ string) *health.Backend {
 	backends := rr.Backends()
+
+	if len(backends) == 0 {
+		return nil
+	}
+
+	if len(backends) == 1 {
+		return backends[0]
+	}
 
 	var best *health.Backend
 
@@ -42,6 +50,9 @@ func (rr *RoundRobin) Next() *health.Backend {
 		case health.Draining:
 			continue
 		case health.Removed:
+			continue
+			
+		case health.Shutdown:
 			continue
 
 		case health.Recovering:

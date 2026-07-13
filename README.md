@@ -20,14 +20,72 @@ It supports protocol-aware routing, zero-downtime configuration reloads, gracefu
 - ❤️ Passive health monitoring
 
 ---
+## Building
 
-# Installation
+### Requirements
 
-Build from source:
+* Go 1.24+
+* Git
+
+Clone the repository:
 
 ```bash
-go build -o heavyrain .
+git clone https://github.com/africanecMorj/mitigation-proxy.git
+cd mitigation-proxy
 ```
+
+Build the binary:
+
+```bash
+go build -o mitigation-proxy ./cmd
+```
+
+The executable will be created in the current directory:
+
+```text
+./mitigation-proxy
+```
+
+Run it:
+
+```bash
+./mitigation-proxy
+```
+
+---
+
+## Cross-compiling
+
+Build for Linux (AMD64):
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o mitigation-proxy-linux-amd64 ./cmd
+```
+
+Build for Linux (ARM64):
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o mitigation-proxy-linux-arm64 ./cmd
+```
+
+---
+
+## Building release packages
+
+To generate release archives and Linux packages (`.deb`, `.rpm`, `.apk`) install GoReleaser:
+
+```bash
+go install github.com/goreleaser/goreleaser/v2@latest
+```
+
+Then run:
+
+```bash
+goreleaser release --snapshot --clean
+```
+
+All generated artifacts will be available in the `dist/` directory.
+
 
 ---
 

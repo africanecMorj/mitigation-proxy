@@ -4,5 +4,6 @@ dist/
 *.apk
 *.tar.gz
 
+/tests
 *_test.go
 

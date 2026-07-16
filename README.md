@@ -306,6 +306,16 @@ Provides near-optimal balancing while requiring minimal overhead.
 lb: p2c
 ```
 
+## Hash ring
+
+Routes new connections depending on the client ip and backend adress hashes.
+
+Subsequent connections from the same user will be routed to the same backend.
+
+```yaml
+lb: sticky
+```
+
 ---
 
 # Backend Lifecycle

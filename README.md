@@ -37,19 +37,19 @@ cd mitigation-proxy
 Build the binary:
 
 ```bash
-go build -o mitigation-proxy ./cmd
+go build -o heavyrain ./cmd
 ```
 
 The executable will be created in the current directory:
 
 ```text
-./mitigation-proxy
+./heavyrain
 ```
 
 Run it:
 
 ```bash
-./mitigation-proxy
+./heavyrain
 ```
 
 ---
@@ -59,13 +59,13 @@ Run it:
 Build for Linux (AMD64):
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o mitigation-proxy-linux-amd64 ./cmd
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o heavyrain-linux-amd64 ./cmd
 ```
 
 Build for Linux (ARM64):
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o mitigation-proxy-linux-arm64 ./cmd
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o heavyrain-linux-arm64 ./cmd
 ```
 
 ---

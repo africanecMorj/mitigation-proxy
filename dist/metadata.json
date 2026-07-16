@@ -1,1 +1,1 @@
-{"project_name":"mitigation-proxy","tag":"v0.0.0","previous_tag":"","version":"0.0.0-SNAPSHOT-5151b82","commit":"5151b8215cede692ece799a0ac5f021d30acdd58","date":"2026-07-13T13:07:40.160947309Z","runtime":{"goos":"linux","goarch":"amd64"}}
+{"project_name":"heavyrain","tag":"v1.0.0","previous_tag":"","version":"1.0.0-SNAPSHOT-4bbf274","commit":"4bbf274d2ebe3436cfe244426c808833911db6d0","date":"2026-07-16T13:21:46.88409912Z","runtime":{"goos":"linux","goarch":"amd64"}}

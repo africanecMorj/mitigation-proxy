@@ -1,9 +1,9 @@
 version: 2
 
-project_name: mitigation-proxy
+project_name: heavyrain
 
 builds:
-  - binary: mitigation-proxy
+  - binary: heavyrain
     main: ./cmd
     env:
       - CGO_ENABLED=0
@@ -25,7 +25,7 @@ archives:
   - formats: [tar.gz]
 
 nfpms:
-  - package_name: mitigation-proxy
+  - package_name: heavyrain
     formats:
       - deb
       - rpm

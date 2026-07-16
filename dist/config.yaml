@@ -1,12 +1,12 @@
 version: 2
-project_name: mitigation-proxy
+project_name: heavyrain
 release:
   github:
     owner: africanecMorj
     name: mitigation-proxy
   name_template: '{{.Tag}}'
 builds:
-  - id: mitigation-proxy
+  - id: heavyrain
     goos:
       - linux
     goarch:
@@ -31,7 +31,7 @@ builds:
       - linux_arm64_v8.0
     dir: .
     main: ./cmd
-    binary: mitigation-proxy
+    binary: heavyrain
     builder: go
     tool: go
     command: build
@@ -58,7 +58,7 @@ archives:
       - src: CHANGELOG*
 nfpms:
   - file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
-    package_name: mitigation-proxy
+    package_name: heavyrain
     contents:
       - src: systemd/heavyrain.service
         dst: /usr/lib/systemd/system/heavyrain.service
@@ -79,10 +79,10 @@ nfpms:
       cshared: /usr/lib
 srpm:
   nfpmrpm: {}
-  package_name: mitigation-proxy
+  package_name: heavyrain
   file_name_template: '{{ .PackageName }}-{{ .Version }}.src.rpm'
   bins:
-    mitigation-proxy: '%{goipath}'
+    heavyrain: '%{goipath}'
 snapshot:
   version_template: '{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}'
 checksum:
